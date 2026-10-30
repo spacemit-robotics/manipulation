@@ -1,0 +1,20 @@
+module: components/control/manipulation
+tests:
+  - name: native-manipulation-contract
+    description: Device contracts, Mock, Nero fake-SDK/IPC and signal tests; no device access.
+    category: functional
+    scopes: [pr, scheduled, release]
+    timeout_s: 180
+    workdir: sdk
+    command: |
+      cmake -S components/control/manipulation -B output/test/manipulation-contract -DCMAKE_BUILD_TYPE=Release -DMANIPULATION_ENABLE_NERO=ON -DMANIPULATION_LOCK_DIRECTORY="$PWD/output/test/manipulation-locks"
+      cmake --build output/test/manipulation-contract -j2
+      ctest --test-dir output/test/manipulation-contract --output-on-failure
+  - name: manipulation-stack-software
+    description: Optional OpenCV calibration, installed consumers, registered extension and cup application; no hardware.
+    category: functional
+    scopes: [scheduled, release]
+    timeout_s: 1200
+    workdir: sdk
+    command: |
+      bash components/control/manipulation/tools/verify_stack.sh "$PWD/output/test/manipulation-stack"

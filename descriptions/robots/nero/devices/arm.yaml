@@ -1,0 +1,27 @@
+# Nero V120 seven-axis arm, no end effector.
+# Joint limits are the pyAgxArm Nero preset, the one source for every Nero limit (see ../README.md).
+# Placeholders are filled by `manipulation configure` (see tools/configure_device.py).
+schema_version: 3
+device:
+    driver: agx_nero_revo2
+    model: nero
+    arm:
+        device_id: arm_main
+        resource_id: agx_${channel:-can0}
+        tolerance_rad: 0.002
+        timeout_s: 10
+        maximum_age_s: 0.2
+        joints:
+            - {name: joint1, minimum_rad: -2.705261, maximum_rad: 2.705261}
+            - {name: joint2, minimum_rad: -1.745330, maximum_rad: 1.745330}
+            - {name: joint3, minimum_rad: -2.757621, maximum_rad: 2.757621}
+            - {name: joint4, minimum_rad: -1.012291, maximum_rad: 2.146755}
+            - {name: joint5, minimum_rad: -2.757621, maximum_rad: 2.757621}
+            - {name: joint6, minimum_rad: -0.733039, maximum_rad: 0.959932}
+            - {name: joint7, minimum_rad: -1.570797, maximum_rad: 1.570797}
+    options:
+        channel: ${channel:-can0}
+        python: ${python}
+        sdk_root: ${datadir}/pyagxarm
+        worker: ${libexecdir}/manipulation/agx_worker.py
+steps: []

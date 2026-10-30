@@ -1,0 +1,7 @@
+include(CMakeFindDependencyMacro)
+find_dependency(Threads)
+find_dependency(yaml-cpp)
+if(@MANIPULATION_ENABLE_CALIBRATION@)
+    find_dependency(OpenCV COMPONENTS core calib3d)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/manipulationTargets.cmake")

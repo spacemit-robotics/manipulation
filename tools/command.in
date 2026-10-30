@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+# SPDX-License-Identifier: Apache-2.0
+set -euo pipefail
+# Resolve symlinks to this script and to the prefix, so links in /usr/local/bin or a linked
+# installation directory still find the installation layout.
+SCRIPT_DIRECTORY="$(cd -- "$(dirname -- "$(realpath -- "${BASH_SOURCE[0]}")")" && pwd -P)"
+INSTALL_PREFIX="$(cd -- "${SCRIPT_DIRECTORY}/@COMMAND_PREFIX_FROM_BINDIR@" && pwd -P)"
+exec "${MANIPULATION_PYTHON:-python3}" -c '
+import json, runpy, sys
+from pathlib import Path
+prefix = Path(sys.argv.pop(1)).resolve()
+sys.argv[0] = "@COMMAND_NAME@"
+layout = json.loads((prefix / ".spacemit-manipulation.json").read_text())
+modules = Path(layout["pythondir"])
+if modules.is_absolute() or not (prefix / modules).resolve().is_relative_to(prefix):
+    raise ValueError("invalid installation Python directory")
+sys.path.insert(0, str(prefix / modules))
+sys.dont_write_bytecode = True
+runpy.run_module("@COMMAND_MODULE@", run_name="__main__")
+' "${INSTALL_PREFIX}" --prefix "${INSTALL_PREFIX}" "$@"

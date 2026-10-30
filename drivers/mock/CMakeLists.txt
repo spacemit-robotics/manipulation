@@ -1,0 +1,2 @@
+target_sources(manipulation_drivers PRIVATE device_mock.cpp)
+manipulation_register_device(RegisterMockDevice)

@@ -1,0 +1,16 @@
+schema_version: 3
+device:
+    driver: mock_device
+    arm:
+        device_id: arm_main
+        resource_id: mock_assembly
+        joints:
+            - {name: joint1, minimum_rad: -1, maximum_rad: 1}
+            - {name: joint2, minimum_rad: -1, maximum_rad: 1}
+    effector:
+        device_id: hand_main
+        channels: [thumb_tip, thumb_base, index_finger, middle_finger, ring_finger, pinky_finger]
+steps:
+    - {capability: joint_point, target_rad: [0.1, -0.1], speed_scale: 0.05}
+    - {capability: effector_position, positions: [0.2, 0.2, 0.3, 0.3, 0.3, 0.3], duration_s: 0.5}
+    - {capability: joint_point, target_rad: [0, 0], speed_scale: 0.05}

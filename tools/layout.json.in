@@ -1,0 +1,10 @@
+{
+    "schema_version": 1,
+    "version": "@PROJECT_VERSION@",
+    "architecture": "@CMAKE_SYSTEM_PROCESSOR@",
+    "bindir": "@CMAKE_INSTALL_BINDIR@",
+    "libdir": "@CMAKE_INSTALL_LIBDIR@",
+    "datadir": "@CMAKE_INSTALL_DATADIR@",
+    "libexecdir": "@CMAKE_INSTALL_LIBEXECDIR@",
+    "pythondir": "@MANIPULATION_PYTHON_DIR@"
+}

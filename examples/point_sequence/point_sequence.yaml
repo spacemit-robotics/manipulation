@@ -1,0 +1,21 @@
+# Offline point sequence on the Mock driver. Joint names follow SO101; limits are test data,
+# not measured SO101 safety or calibration values. speed_scale is a controller ratio, not rad/s.
+schema_version: 3
+device:
+    driver: mock_device
+    arm:
+        device_id: so101_mock
+        resource_id: so101_mock_bus
+        joints:
+            - {name: shoulder_pan, minimum_rad: -1.0, maximum_rad: 1.0}
+            - {name: shoulder_lift, minimum_rad: -1.0, maximum_rad: 1.0}
+            - {name: elbow_flex, minimum_rad: -1.0, maximum_rad: 1.0}
+            - {name: wrist_flex, minimum_rad: -1.0, maximum_rad: 1.0}
+            - {name: wrist_roll, minimum_rad: -1.0, maximum_rad: 1.0}
+    effector:
+        device_id: so101_gripper_mock
+        channels: [gripper]
+steps:
+    - {capability: joint_point, target_rad: [0.02, 0.02, -0.02, 0, 0], speed_scale: 0.05}
+    - {capability: effector_position, positions: [0.1], duration_s: 0.5}
+    - {capability: joint_point, target_rad: [0, 0, 0, 0, 0], speed_scale: 0.05}

@@ -1,0 +1,6 @@
+{
+    "urdf": "nero_description.urdf",
+    "base": "base_link",
+    "tip": "link7",
+    "joints": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "joint7"]
+}
