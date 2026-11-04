@@ -299,6 +299,24 @@ CommandResult ArmSession::Submit(const JointPoint& point) {
         [](const ArmState&) { return 0.0; }, [&] { impl_->arm->Submit(resolved); });
 }
 
+CommandResult ArmSession::Follow(const JointPoint& point) {
+    Ready();
+    Check(impl_->arm->GetCapabilities().joint_point, "joint point unsupported");
+    CheckTarget(point.target_rad, point.speed_scale);
+    Check(point.resend_interval_s == 0, "a followed target is replaced, never re-sent");
+    auto resolved = point;
+    resolved.tolerance_rad = ResolveTolerance(point.tolerance_rad, impl_->config.tolerance_rad);
+    Begin(resolved, resolved.tolerance_rad, Completion::kDelivered, [](const ArmState&) { return 0.0; },
+        [&] { impl_->arm->Submit(resolved); });
+    auto& p = *impl_;
+    if (p.result.status == Result::kRunning) {
+        p.result.status = Result::kSucceeded;
+        p.result.detail = "sent: target sent; arrival not awaited";
+        p.settling = true;
+    }
+    return p.result;
+}
+
 CommandResult ArmSession::SubmitTrajectory(const JointTrajectory& trajectory) {
     Ready();
     Check(impl_->arm->GetCapabilities().joint_trajectory, "joint trajectory unsupported");

@@ -42,20 +42,16 @@ def check(prefix):
         directory = temporary / "unrelated cwd"
         directory.mkdir()
         layout = json.loads((moved / ".spacemit-manipulation.json").read_text())
-        compatibility = moved / layout["datadir"] / "cup_shake"
-        assert compatibility.is_symlink() and os.readlink(compatibility) == "dice_arena"
-        assert (compatibility / "config/mock.json").samefile(
-            moved / layout["datadir"] / "dice_arena/config/mock.json")
-        for name in ("manipulation", "hand-eye", "cup-shake", "dice-arena"):
+        assert not (moved / layout["bindir"] / "cup-shake").exists()
+        assert not (moved / layout["datadir"] / "cup_shake").exists()
+        for name in ("manipulation", "hand-eye", "dice-arena"):
             run([moved / layout["bindir"] / name, "--help"], directory)
         output = run([moved / layout["bindir"] / "manipulation", "demo"], directory)
         assert '"status":"succeeded"' in output, output
-        output = run([moved / layout["bindir"] / "cup-shake", "mock"], directory)
+        output = run([moved / layout["bindir"] / "dice-arena", "mock"], directory)
         records = [json.loads(line) for line in output.splitlines() if line.startswith("{")]
         assert sum(record.get("status") == "completed" for record in records) == 3, output
         assert not any(record.get("physical_grip_verified") for record in records)
-        assert run([moved / layout["bindir"] / "dice-arena", "mock"], directory).count(
-            '"status": "completed"') == 3
         app = moved / layout["datadir"] / "dice_arena"
         for script in ("calibrate.sh", "calibrate_web.sh", "calibration_web_service.sh"):
             output = run(["bash", app / script, "--help"], directory)

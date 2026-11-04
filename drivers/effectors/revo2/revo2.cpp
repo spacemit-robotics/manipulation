@@ -1,6 +1,7 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
-// Normalized right-hand Revo2 adapter over the same owned worker as Nero.
+// Normalized right-hand Revo2 adapter over the same owned worker as Nero. The hand's own scale is 0 open,
+// 1 closed; the framework's is 0 closed, 1 open.
 #include "agx_session.h"
 #include <iomanip>
 #include <sstream>
@@ -28,7 +29,9 @@ public:
     EffectorState Read() override {
         const auto node = connection_->Call("effector_read");
         EffectorState result;
-        result.positions = node["positions"].as<std::vector<double>>();
+        for (const double position : node["positions"].as<std::vector<double>>()) {
+            result.positions.push_back(1 - position);
+        }
         result.sample_id = node["sample_id"].as<std::uint64_t>();
         result.received_at = Clock::time_point(std::chrono::duration_cast<Clock::duration>(
             std::chrono::nanoseconds(node["received_ns"].as<std::int64_t>())));
@@ -43,7 +46,7 @@ public:
         fields << std::setprecision(17) << ",\"duration_s\":" << point.duration_s << ",\"positions\":[";
         for (std::size_t i = 0; i < point.positions.size(); ++i) {
             if (i) fields << ',';
-            fields << point.positions[i];
+            fields << 1 - point.positions[i];
         }
         fields << ']';
         connection_->Call("effector_submit", fields.str());

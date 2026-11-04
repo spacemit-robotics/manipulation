@@ -8,10 +8,7 @@
 该预设在《NERO 用户手册》关节运动范围内：J1–J6 各收窄 2°，J7 为 ±90°（手册 ±97°）。
 软件限位并非碰撞检测，不能替代现场工作空间检查。
 
-`nero_description.urdf` 与 `LICENSE` 来自 wangannyi/dice_demo 工作区
-`44708ab5ae8e928222c0c536a2e89d19257540e7` 的
-`nero_revo2_control/models/hand_geometry/nero/urdf/nero_description.urdf`，
-许可为 MIT，版权归 aalicecc；仅 `<limit>` 由原来截断到两位小数的弧度值改为上述 SDK 预设。
+`nero_description.urdf` 使用 MIT 许可（见 `LICENSE`），`<limit>` 取自上述 SDK 预设。
 模型仅用于离线关节链计算，未复制可视化网格。
 `model.json` 明确 `base_link → link7` 和七轴顺序。URDF 中的网格引用在本包中不解析。
 正运动学不包含碰撞检测或实物 TCP 标定。现场 HOME、TCP、外参不作为通用模型发布。

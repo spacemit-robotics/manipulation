@@ -37,7 +37,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | --- | --- | --- |
 | `joint_point` | `target_rad` | 数量与 `joints` 相同，每项在关节限位内 |
 | | `speed_scale` | 控制器速度倍率 `(0, 1]`，不是 rad/s；不低于驱动下限 |
-| `effector_position` | `positions` | 数量与 `channels` 相同，每项在 `[0, 1]` |
+| `effector_position` | `positions` | 数量与 `channels` 相同，每项在 `[0, 1]`：`0` 闭合，`1` 张开 |
 | | `duration_s` | `(0, 驱动上限]`，且不超过末端 `timeout_s` |
 
 `options` 中的路径由驱动声明，相对配置文件所在目录解析。
@@ -49,7 +49,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `position` | 新鲜、完整的位置和状态反馈 | 连续 3 个样本在容差内且静止时 `succeeded` | 驱动确认停止为 `cancelled`，否则 `stop_unknown` |
 | `none` | 只要求新鲜的在线样本 | 下发后等待 `duration_s`，结果 `unverified` | 始终 `stop_unknown` |
 
-`none` 只降低验证要求，不会让驱动声称具备反馈。经 Nero 末端口接入的 Revo2 静止时不上报位置，须用 `none`；此时以手指电流帧作为在线证据，手侧显示为 `unknown`。
+所有末端的位置含义相同：`0` 闭合，`1` 张开，由驱动转换为设备自身的刻度。`none` 只降低验证要求，不会让驱动声称具备反馈。经 Nero 末端口接入的 Revo2 静止时不上报位置，须用 `none`；此时以手指电流帧作为在线证据，手侧显示为 `unknown`。
 
 ### 驱动选项
 
@@ -123,7 +123,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | --- | --- |
 | `enabled`、`position_mode`、`moving`、`fault` | 机械臂使能、位置模式、实际运动、故障 |
 | `joints_rad` | 关节位置，按配置顺序 |
-| `effector_feedback` / `effector_positions` | 末端反馈类型 / 各通道 `[0,1]` 位置；`none` 时位置为空数组 |
+| `effector_feedback` / `effector_positions` | 末端反馈类型 / 各通道位置（`0` 闭合，`1` 张开）；`none` 时位置为空数组 |
 | `effector_enabled` | `true`、`false`，驱动无法读回时为 `null` |
 | `effector_loads` | 各通道负载 `[-1,1]`（额定输出的比例，符号为驱动方向），不提供时为空数组 |
 | `effector_holding` | 抓握判断；仅声明 `grasp_detection` 的末端给出 `true` / `false`，其他为 `null` |
@@ -143,7 +143,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `hold` / `hand-hold` | 保持当前位置，不释放扭矩 |
 | `joint-step JOINT DELTA` / `joint-move Q...` | 单关节相对 / 全部关节绝对点位，单位 rad；`JOINT` 为关节名或从 0 开始的序号；`--speed`（默认 0.05） |
 | `arm-check` | 同 `manipulation-device arm-check`，会运动 |
-| `hand-move V...` | 每个通道一个 `[0,1]` 绝对位置；`--duration S`（默认 2） |
+| `hand-move V...` | 每个通道一个绝对位置（`0` 闭合，`1` 张开）；`--duration S`（默认 2） |
 | `hand-step CHANNEL DELTA` | 单通道 `±0.01`，仅限有位置反馈的末端 |
 | `hand-grasp` | 闭合到夹住或完全闭合，仅限声明 `grasp_detection` 的末端；`--positions V...`（默认全 0）、`--duration S`（默认 1） |
 | `teach FILE` / `fk FILE` | 记录静止姿态 / 姿态文件的正运动学；文件相对现场目录，`teach` 不覆盖 |
@@ -235,6 +235,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `HoldArm()` / `HoldEffector()` | 保持停止，不卸力、不清除锁定 |
 | `JogArm(joint_index, delta_rad, speed_scale, cancelled)` | 基于当前位置的单关节相对点位 |
 | `MoveArm` / `MoveArmPath` / `MoveArmTrajectory` / `MoveEffector` | 阻塞执行并返回 `CommandResult`；`cancelled` 每 10 ms 调用一次 |
+| `FollowArm(point)` / `FollowEffector(point)` | 目标跟随：发出目标即返回，见第 6 节 |
 | `Latched()` | 是否处于锁定 |
 
 ## 6. Python API
@@ -255,7 +256,9 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `move_arm(target_rad, speed_scale, tolerance_rad=0, wait_for_arrival=True, resend_interval_s=0)` | 关节点位 |
 | `move_arm_path(path_rad, speed_scale, max_velocity_rad_s, max_acceleration_rad_s2, tolerance_rad=0)` | 连续路径 |
 | `move_arm_trajectory(times_s, positions_rad, command_rate_hz=100, max_step_rad=0.0174533, speed_scale=1.0, tolerance_rad=0, wait_for_arrival=True, effector_schedule=(), allow_unverified=False)` | 定时轨迹 |
-| `move_effector(positions, duration_s=0.5, allow_unverified=False)` | 末端各通道移到 `[0,1]` 绝对位置 |
+| `follow_arm(target_rad, speed_scale)` | 关节目标跟随，发出目标即返回 |
+| `move_effector(positions, duration_s=0.5, allow_unverified=False)` | 末端各通道移到绝对位置（`0` 闭合，`1` 张开） |
+| `follow_effector(positions, duration_s=0.1, allow_unverified=False)` | 末端目标跟随，发出目标即返回 |
 | `close()` | 关闭会话；也可使用 `with` |
 
 每个方法接受 `timeout`（秒，默认 10，最长 180，含排队时间）和 `is_cancelled`（回调）。运动未成功时抛出 `DeviceCommandError`：结果为含 `status` 的字典，设备进程拒绝请求时为错误字符串。
@@ -269,7 +272,12 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `move_arm_trajectory(..., wait_for_arrival=False)` | 最后一个点已发送，机械臂可能仍在收尾 | `delivered` |
 | 无反馈末端，或带 `effector_schedule` | 已下发并等完执行时间；结果 `unverified`，须 `allow_unverified=True` | — |
 | 抓握判断末端停在物体上 | 连续三个样本判定夹住 | `effector_grasp_holding` |
+| `follow_arm` / `follow_effector` | 目标已发出，不等到位；无反馈末端结果 `unverified` | `sent` |
 
+- **目标跟随**：用于遥操作、视觉伺服等高频更新目标的场景。
+  - 首个目标要求机械臂静止，之后的目标可以替换机械臂还在运动中的目标；每个目标仍检查关节限位、使能和故障。
+  - 结束时调用 `hold_arm()` 停在当前位置，或 `move_arm()` 到达最终目标并确认到位。
+  - 更新频率受设备往返时间限制；程序异常退出时，设备停在最后一个目标。
 - **容差**：`tolerance_rad` 不超过 0.8°，`0` 表示使用配置中的 `tolerance_rad`。
 - **重发**：`resend_interval_s`（`0`，或 0.02–0.2 s）在超出容差期间按该间隔原样重发目标。
 - **Nero 运动判定**：Nero 的"运动中"由关节反馈测得（0.2 s 内变化超过 0.05°）；停在目标外超过 1 s 时原样重发，最多 5 次。连续发送时控制器会留下零点几度的稳态偏差，需按场景给出容差。

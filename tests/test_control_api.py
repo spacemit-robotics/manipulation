@@ -133,7 +133,7 @@ class ControlApiTests(unittest.TestCase):
             self.assertTrue(state["enabled"])
             self.assertTrue(state["effector_enabled"])
             self.assertEqual(state["joints_rad"], [0, 0])
-            self.assertEqual(state["effector_positions"], [0])
+            self.assertEqual(state["effector_positions"], [1])  # A Mock hand rests open.
 
     def test_read_only_permission_cannot_be_overridden_in_a_request(self):
         with DeviceClient(CLI, self.filename, allow_motion=False) as client:
@@ -212,6 +212,41 @@ class ControlApiTests(unittest.TestCase):
                     expected = {permission: True} if permission else {}
                     client_type.assert_called_once_with(CLI, self.filename, **expected)
                     getattr(client_type.return_value.__enter__.return_value, method).assert_called_once_with()
+
+    def test_follow_sends_each_target_without_waiting_and_keeps_every_check(self):
+        with DeviceClient(CLI, self.filename, allow_effector_disable=True) as client:
+            for step in range(1, 6):
+                result = client.follow_arm([0.1 * step, -0.1 * step], 0.5)
+                self.assertEqual(result["status"], "succeeded")
+                self.assertTrue(result["detail"].startswith("sent"), result)
+                self.assertTrue(client.follow_effector([1 - 0.1 * step])["detail"].startswith("sent"))
+            self.assertAlmostEqual(client.state()["effector_positions"][0], 0.5)
+            self.assertEqual(client.hold_arm()["status"], "succeeded")
+            self.assertEqual(client.move_arm([0, 0], 0.5)["status"], "succeeded")  # A followed target leaves no latch.
+            for bad in ([2.0, 0.0], [0.0]):
+                with self.assertRaises(DeviceCommandError):
+                    client.follow_arm(bad, 0.5)
+            for bad in ([1.5], [0.5, 0.5]):
+                with self.assertRaises(DeviceCommandError):
+                    client.follow_effector(bad)
+            self.assertEqual(client.state()["joints_rad"], [0, 0])
+            client.disable_effector()
+            with self.assertRaises(DeviceCommandError):
+                client.follow_effector([0.5])
+
+    def test_follow_without_position_feedback_is_unverified(self):
+        self.plan["device"]["effector"]["feedback"] = "none"
+        self.save()
+        with DeviceClient(CLI, self.filename) as client:
+            with self.assertRaises(DeviceCommandError):
+                client.follow_effector([0.5])
+            self.assertEqual(client.follow_effector([0.5], allow_unverified=True)["status"], "unverified")
+
+    def test_read_only_session_refuses_follow(self):
+        with DeviceClient(CLI, self.filename, allow_motion=False) as client:
+            for operation in (lambda: client.follow_arm([0.1, 0.1], 0.5), lambda: client.follow_effector([0.5])):
+                with self.assertRaises(DeviceCommandError):
+                    operation()
 
     def test_pose_move_refuses_a_point_move_longer_than_the_timeout(self):
         state = dict(joints_rad=[0.0, 0.0], controller_limits=[dict(max_velocity_rad_s=1.0)] * 2)

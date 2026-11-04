@@ -210,7 +210,7 @@ void TestMockTorque(const std::string& directory) {
     session.Connect();
     session.DisableEffector();
     Invalid([&] { session.MoveEffector({{0.5}, 0.1}); });
-    Check(!session.Latched() && session.ReadEffector().positions == std::vector<double>{0},
+    Check(!session.Latched() && session.ReadEffector().positions == std::vector<double>{1},
         "disabled effector moved or latched");
     session.EnableEffector();
     session.DisableArm();

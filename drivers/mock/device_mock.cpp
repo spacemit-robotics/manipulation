@@ -40,7 +40,7 @@ private:
 
 class MockEffector final : public EndEffector {
 public:
-    MockEffector(std::size_t channels, bool feedback) : positions_(channels, 0), feedback_(feedback) {}
+    MockEffector(std::size_t channels, bool feedback) : positions_(channels, 1), feedback_(feedback) {}
     EffectorCapabilities GetCapabilities() const override { return {feedback_, 120, true, true}; }
     void Connect() override { connected_ = true; }
     void Disconnect() noexcept override { connected_ = false; }

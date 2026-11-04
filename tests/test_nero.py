@@ -278,6 +278,29 @@ class NeroIntegrationTests(unittest.TestCase):
             self.assertIn("target_reached", result["detail"])  # A waiting command still waits.
             self.assertLess(max(abs(q) for q in client.state()["joints_rad"]), math.radians(0.5))
 
+    def test_follow_replaces_the_target_while_the_arm_moves(self):
+        self.channel("can_lag")
+        with DeviceClient(CLI, self.filename) as client:
+            for step in (0.05, 0.1, 0.15):
+                result = client.follow_arm([step] * 7, 0.5)
+                self.assertEqual((result["status"], result["detail"][:4]), ("succeeded", "sent"))
+            self.assertTrue(client.state()["moving"])
+            trace = (self.sdk / "pyAgxArm/recovery-events.jsonl").read_text(encoding="utf-8").splitlines()
+            moves = [event["target"] for event in map(json.loads, trace) if event["op"] == "move_j"]
+            self.assertEqual(moves[-3:], [[0.05] * 7, [0.1] * 7, [0.15] * 7])
+            self.assertIn("target_reached", client.move_arm([0.15] * 7, 0.5, tolerance_rad=math.radians(0.5))["detail"])
+
+    def test_revo2_uses_the_framework_scale_of_zero_closed_one_open(self):
+        names = ["thumb_tip", "thumb_base", "index_finger", "middle_finger", "ring_finger", "pinky_finger"]
+        self.plan["device"]["effector"] = dict(device_id="hand_main", channels=names, feedback="position")
+        self.channel("can_fixture")
+        with DeviceClient(CLI, self.filename) as client:
+            state = client.state()
+            self.assertEqual(state["effector_positions"], [1] * 6)  # The fixture hand starts open.
+            self.assertEqual(client.move_effector([0.7] * 6, duration_s=0.05)["status"], "succeeded")
+            hand = client.state()["effector_positions"]
+            self.assertTrue(all(abs(value - 0.7) < 0.01 for value in hand), hand)
+
     def test_path_outside_limits_writes_nothing(self):
         self.channel("can_path")
         with DeviceClient(CLI, self.filename) as client:

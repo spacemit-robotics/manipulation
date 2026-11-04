@@ -223,6 +223,44 @@ const DeviceDefinition& DeviceSession::Definition() const { return impl_->defini
 CommandResult DeviceSession::MoveArm(const JointPoint& point, const std::function<bool()>& cancelled) {
     return RunArm([&] { return impl_->arm->Submit(point); }, cancelled);
 }
+CommandResult DeviceSession::FollowArm(const JointPoint& point) {
+    Ready();
+    auto& p = *impl_;
+    if (p.effector) Check(!ReadEffector().fault, "effector faulted before arm motion");
+    auto result = p.arm->Follow(point);
+    p.latched = Failed(result.status);
+    result.command_id = ++p.command_id;
+    return result;
+}
+CommandResult DeviceSession::FollowEffector(const EffectorPoint& point) {
+    Ready();
+    auto& p = *impl_;
+    CheckEffectorPoint(point);
+    const auto arm = ReadArm();
+    Check(!arm.fault && arm.enabled && arm.position_mode, "arm not ready for tool motion");
+    const auto before = ReadEffector();
+    Check(!before.fault, "effector faulted");
+    Check(!before.enabled.has_value() || *before.enabled, "effector disabled");
+    const bool open_loop = p.definition.effector.feedback == EffectorFeedback::kNone;
+    CommandResult result{++p.command_id, open_loop ? Result::kUnverified : Result::kSucceeded,
+        "sent: target sent; arrival not awaited"};
+    try {
+        p.effector->Submit(point);
+        return result;
+    } catch (const CommandRejected&) {
+        throw;  // Refused before any device write: nothing to stop or latch.
+    } catch (const std::exception& error) {
+        result.detail = error.what();
+    } catch (...) {
+        result.detail = "unknown effector failure";
+    }
+    result.status = Result::kFault;
+    try {
+        if (open_loop || !p.effector->Hold()) result.status = Result::kStopUnknown;
+    } catch (...) { result.status = Result::kStopUnknown; }
+    p.latched = true;
+    return result;
+}
 CommandResult DeviceSession::JogArm(std::size_t joint_index, double delta_rad, double speed_scale,
     const std::function<bool()>& cancelled) {
     Ready();

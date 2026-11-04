@@ -67,11 +67,16 @@ def check(prefix):
                 raise AssertionError(str(arguments) + "\n" + result.stderr)
             return result.stdout
 
-        for name in ("manipulation", "hand-eye", "cup-shake", "dice-arena"):
+        for name in ("manipulation", "hand-eye", "dice-arena"):
             assert command(name, "--help").startswith("usage: " + name + " ")
+        for operation in ("check", "demo", "configure", "validate", "inspect", "capabilities", "arm-check", "enable",
+                          "disable", "hand-enable", "hand-disable", "hold", "hand-hold", "joint-step", "joint-move",
+                          "hand-move", "hand-step", "hand-grasp", "pose", "monitor", "ik", "pose-move", "line-move",
+                          "teach", "fk", "manifest"):
+            assert command("manipulation", operation, "--help").startswith("usage: ")
+        command("manipulation", "ik", 1, expected=2, error="the following arguments are required")
         command("manipulation", "check", "--profile", "build")
         assert '"status":"succeeded"' in command("manipulation", "demo")
-        assert command("cup-shake", "mock").count('"status": "completed"') == 3
         assert command("dice-arena", "mock").count('"status": "completed"') == 3
         command("manipulation", "configure", "unknown_model", expected=2, error="available: nero")
         command("manipulation", "configure", "nero", "--variant", "missing", expected=2,
@@ -102,12 +107,12 @@ def check(prefix):
         command("manipulation", "hand-step", "6", "0.01", expected=2)
         command("manipulation", "hand-step", "2", "nan", expected=2)
         for channel in range(6):  # Moves at once: no flag, no typed confirmation.
-            output = command("manipulation", "hand-step", str(channel), "0.01")
+            output = command("manipulation", "hand-step", str(channel), "-0.01")
             assert "'status': 'succeeded'" in output
-        output = command("manipulation", "hand-step", "pinky_finger", "0.01")
+        output = command("manipulation", "hand-step", "pinky_finger", "-0.01")
         assert "'status': 'succeeded'" in output
-        # Mock positions start at 0 for every connection, so a negative step is refused before submission.
-        command("manipulation", "hand-step", "pinky_finger", "-0.01", expected=2)
+        # A Mock hand starts open (1) on every connection, so an opening step is refused before submission.
+        command("manipulation", "hand-step", "pinky_finger", "0.01", expected=2)
         # Open-loop hand: relative steps are refused, absolute moves are delivered and reported unverified.
         open_loop = json.loads(json.dumps(plan))
         open_loop["device"]["effector"]["feedback"] = "none"
@@ -132,7 +137,7 @@ def check(prefix):
         assert "5 waypoints" in output and "'status': 'succeeded'" in output, output
         command("manipulation", "hand-grasp", expected=2, error="no grasp evidence")  # The Mock hand has none.
         output = command("manipulation", "monitor", "--count", 3, "--rate", 20)
-        assert output.count("joints_deg") == 3 and "pinky_finger 0.000" in output, output
+        assert output.count("joints_deg") == 3 and "pinky_finger 1.000" in output, output
         command("manipulation", "monitor", "--rate", 50, expected=2)
 
         values = dataset()
@@ -160,11 +165,11 @@ def check(prefix):
         write(source / "cup_grasp_demo/flow/green_pipeline.py",
               "import json\nfrom pathlib import Path\ndef load_config(path):\n"
               "    return json.loads(Path(path).read_text())\ndef validate(config):\n    return config['green_cup']\n")
-        command("cup-shake", "cycle", expected=2)
-        command("cup-shake", "--source", source, "configure", expected=2)  # No site pipeline before `apply`.
+        command("dice-arena", "cycle", expected=2)
+        command("dice-arena", "--source", source, "configure", expected=2)  # No site pipeline before `apply`.
         write(site / "green_cup.json", green)  # Normally created by `calibrate.sh apply`.
         command("dice-arena", "--source", source, "configure")
-        command("cup-shake", "--source", source, "configure", expected=1)
+        command("dice-arena", "--source", source, "configure", expected=1)
         application = json.loads((site / "cup_application.json").read_text())
         assert not Path(application["device_plan"]).is_absolute()
         assert application["planner"]["config"] == "green_cup.json", application["planner"]
@@ -174,12 +179,9 @@ def check(prefix):
         for key in ("executable", "device_plan", "policy_library"):
             application[key] = str((mock.parent / application[key]).resolve())
         write(site / "cup_application.json", application)
-        command("cup-shake", "inspect")
         command("dice-arena", "inspect")
-        output = command("cup-shake", "cycle")
-        assert output.count('"status": "completed"') == 3
         assert command("dice-arena", "cycle").count('"status": "completed"') == 3
-        assert '"at_home": true' in command("cup-shake", "home")  # The original home action, no camera.
+        assert '"at_home": true' in command("dice-arena", "home")  # The original home action, no camera.
 
         # The game runs from the installation: no game source, staging or copy.
         command("dice-arena", "stage", expected=2)

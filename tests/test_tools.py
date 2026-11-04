@@ -86,10 +86,8 @@ done < <(resolve_nonros2_dependency_closure "$2" 1)
                 ("components/thirdparty/pyagxarm", ["components/thirdparty/pyagxarm"],
                  {"python3-can", "python3-typing-extensions"}),
                 ("components/control/manipulation",
-                 ["components/thirdparty/pyagxarm", "components/peripherals/motor",
-                  "components/control/manipulation"],
-                 {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy",
-                  "libboost-dev", "libgpiod-dev", "rustc-1.91", "cargo-1.91"})):
+                 ["components/thirdparty/pyagxarm", "components/control/manipulation"],
+                 {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy"})):
             with self.subTest(package=package), tempfile.TemporaryDirectory() as temporary:
                 environment = dict(os.environ)
                 for key in ("BUILD_CONFIG_FILE", "BUILD_TARGET", "BUILD_TARGET_FILE",

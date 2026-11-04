@@ -204,6 +204,22 @@ class DeviceClient:
                             tolerance_rad=tolerance_rad, wait_for_arrival=bool(wait_for_arrival),
                             resend_interval_s=float(resend_interval_s), **kwargs)
 
+    def follow_arm(self, target_rad, speed_scale, **kwargs):
+        """Send a joint target and return without waiting for arrival, to track a moving target at a high rate.
+
+        The first target needs a stationary arm; later ones may replace a target the arm is still moving
+        to. Finish with hold_arm() (stop where it is) or move_arm() (arrive at a final target).
+        """
+        return self._motion("arm_follow", target_rad=list(target_rad), speed_scale=speed_scale, **kwargs)
+
+    def follow_effector(self, positions, duration_s=0.1, *, allow_unverified=False, **kwargs):
+        """As follow_arm for the end effector; state() reports position and grasp evidence meanwhile.
+
+        Without position feedback the result is "unverified", accepted only with allow_unverified=True.
+        """
+        return self._motion("effector_follow", {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
+                            positions=list(positions), duration_s=duration_s, **kwargs)
+
     def move_arm_trajectory(self, times_s, positions_rad, *, command_rate_hz=100.0, max_step_rad=0.0174533,
                             speed_scale=1.0, tolerance_rad=0.0, wait_for_arrival=True, effector_schedule=(),
                             allow_unverified=False, **kwargs):
@@ -239,7 +255,9 @@ class DeviceClient:
                             tolerance_rad=tolerance_rad, **kwargs)
 
     def move_effector(self, positions, duration_s=0.5, *, allow_unverified=False, **kwargs):
-        """An effector without feedback returns status "unverified" (delivered, not measured).
+        """Per-channel positions: 0 closed, 1 open, on every end effector.
+
+        An effector without feedback returns status "unverified" (delivered, not measured).
 
         Such a result is accepted only with allow_unverified=True; it never means the target was reached.
         """

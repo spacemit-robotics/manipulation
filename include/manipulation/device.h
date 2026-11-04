@@ -40,7 +40,7 @@ struct EffectorState {
     std::optional<bool> holding = std::nullopt;
 };
 struct EffectorPoint {
-    std::vector<double> positions;  // Per-channel normalized [0,1].
+    std::vector<double> positions;  // Per-channel normalized: 0 closed, 1 open, on every end effector.
     double duration_s = 0.5;
 };
 // An effector target sent at_s after an arm trajectory starts, while the arm moves: an arm-and-hand
@@ -130,6 +130,10 @@ public:
     CommandResult JogArm(std::size_t joint_index, double delta_rad, double speed_scale = 0.05,
         const std::function<bool()>& cancelled = {});
     CommandResult MoveArm(const JointPoint& point, const std::function<bool()>& cancelled = {});
+    // Target following, for tracking a moving target at a high rate: sends the target and returns without
+    // waiting for arrival. The first target needs a stationary arm; later ones may replace a target the
+    // arm is still moving to. Finish with HoldArm (stop where it is) or MoveArm (arrive at a final target).
+    CommandResult FollowArm(const JointPoint& point);
     // Continuous motion through the waypoints (drivers with the joint_path capability).
     CommandResult MoveArmPath(const JointPath& path, const std::function<bool()>& cancelled = {});
     // Timed trajectory, streamed as given (drivers with the joint_trajectory capability). With effector
@@ -138,6 +142,9 @@ public:
     CommandResult MoveArmTrajectory(const JointTrajectory& trajectory, const std::function<bool()>& cancelled = {},
         const std::vector<TimedEffectorPoint>& effector = {});
     CommandResult MoveEffector(const EffectorPoint& point, const std::function<bool()>& cancelled = {});
+    // As FollowArm for the end effector. The state reports position and grasp evidence meanwhile; without
+    // position feedback the result is unverified.
+    CommandResult FollowEffector(const EffectorPoint& point);
     bool HasEffector() const;
     bool Latched() const;
     const DeviceDefinition& Definition() const;

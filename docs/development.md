@@ -54,12 +54,13 @@
 | `Diagnose` | 主动查询固件等参数，不运动 |
 | `Enable` | 显式使能，仅在 `GetCapabilities().enable` 为真时调用 |
 | `Disable` | 显式释放扭矩，仅在 `disable` 能力为真时调用；不能作为停止的替代 |
-| `Submit` | 下发目标即返回，不等待完成；目标单位 rad，`speed_scale` 为控制器倍率 |
+| `Submit` | 下发目标即返回，不等待完成；目标单位 rad，`speed_scale` 为控制器倍率。可能在运动中调用（接着未等到位的命令或目标跟随），是否允许由会话判断，驱动不因 `moving` 拒绝 |
 | `SubmitPath`（可选） | 连续路径，下发即返回；`GetCapabilities().joint_path` 为真时调用。`tolerance_rad` 已由会话确定。执行期间 `Read` 须报告 `moving`，`Hold` 须先停止发送 |
 | `Hold` | 新鲜反馈确认静止后返回 true；不以断电或失能代替；无法确认返回 false |
 
 末端执行器 `EndEffector` 另需遵守：
 
+- 位置统一为 `0` 闭合、`1` 张开，驱动负责转换为设备自身的刻度；上层命令和应用不感知具体设备。
 - `feedback: none` 时 `Read` 只返回在线样本（`positions` 为空），不得用命令值冒充位置；会话据此开环执行，结果为 `unverified`。
 - `EffectorState::enabled` 未知时保留 `std::nullopt`；声明 `enable` / `disable` 能力的驱动必须能读回扭矩状态。
 - `EffectorState::loads` 可报告各通道负载（`[-1,1]`），不支持时留空。

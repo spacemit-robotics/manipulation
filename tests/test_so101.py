@@ -294,6 +294,66 @@ class So101Tests(unittest.TestCase):
                 client.enable_effector()
                 self.assertTrue(client.state()["effector_enabled"])
 
+    def test_follow_replaces_targets_while_moving_and_stops_on_hold(self):
+        self.bus.stall = {motor_id: 2048 for motor_id in range(1, 6)}  # The arm never reaches a target here.
+        with self.client() as client:
+            goals = ([0.05] * 5, [0.1] * 5, [0.15] * 5)
+            result = client.follow_arm(goals[0], 0.5)
+            self.assertEqual((result["status"], result["detail"][:4]), ("succeeded", "sent"))
+            self.bus.registers[1][66] = 1  # Now reported moving: a later target may replace the goal.
+            for goal in goals[1:]:
+                self.assertEqual(client.follow_arm(goal, 0.5)["status"], "succeeded")
+            sent = [data for motor_id, address, data in self.bus.writes if motor_id == 1 and address == 42]
+            self.assertEqual(len(sent), 3)
+            self.assertEqual(int.from_bytes(sent[-1][:2], "little"), round((0.15 + math.pi) * 4095 / (2 * math.pi)))
+            self.bus.registers[1][66] = 0
+            self.assertEqual(client.hold_arm()["status"], "succeeded")
+            goal = bytes(self.bus.registers[1][42:44])
+            self.assertEqual(int.from_bytes(goal, "little"), 2048)  # Hold stops where the arm is.
+            self.assertEqual(client.state()["fault"], False)
+
+    def test_point_moves_hand_over_while_the_arm_still_moves(self):
+        # line-move on a driver without paths: the next waypoint starts before the arm is still.
+        with self.client() as client:
+            self.assertIn("within_tolerance", client.move_arm([0.05] * 5, 0.5, wait_for_arrival=False)["detail"])
+            self.bus.registers[1][66] = 1
+            self.assertIn("within_tolerance", client.move_arm([0.1] * 5, 0.5, wait_for_arrival=False)["detail"])
+            self.bus.registers[1][66] = 0
+            self.assertIn("target_reached", client.move_arm([0.15] * 5, 0.5)["detail"])
+
+    def test_follow_needs_a_stationary_start_and_valid_target_before_any_write(self):
+        self.bus.registers[1][66] = 1
+        with self.client() as client:
+            with self.assertRaises(DeviceCommandError):
+                client.follow_arm([0.05] * 5, 0.5)
+            self.bus.registers[1][66] = 0
+            with self.assertRaises(DeviceCommandError):
+                client.follow_arm([3.0] * 5, 0.5)
+            self.bus.registers[1][40] = 0
+            with self.assertRaises(DeviceCommandError):
+                client.follow_arm([0.05] * 5, 0.5)
+        self.assertEqual(self.bus.writes, [])
+
+    def test_lost_follow_target_latches_the_session(self):
+        self.bus.drop_goals = True
+        with self.client() as client:
+            with self.assertRaises(DeviceCommandError) as lost:
+                client.follow_arm([0.05] * 5, 0.5)
+            self.assertIn(lost.exception.result["status"], ("fault", "stop_unknown"))
+            with self.assertRaises(DeviceCommandError):
+                client.follow_arm([0.05] * 5, 0.5)
+
+    def test_gripper_follow_reports_grasp_evidence_without_waiting(self):
+        self.gripper()
+        self.bus.stall[6] = 2600
+        self.bus.word(6, 60, 0x400 | 300)
+        with self.client() as client:
+            result = client.follow_effector([0.0])
+            self.assertEqual((result["status"], result["detail"][:4]), ("succeeded", "sent"))
+            state = client.state()
+            self.assertTrue(state["effector_holding"])
+            self.assertAlmostEqual(state["effector_loads"][0], -0.3)
+
     def test_gripper_grasp_holding_on_load_and_empty_close(self):
         self.gripper()
         with self.client() as client:

@@ -32,6 +32,8 @@ public:
     void Disable();
     CommandResult Hold();
     CommandResult Submit(const JointPoint& point);
+    // Sends the target and completes at once; the next target may start while the arm moves.
+    CommandResult Follow(const JointPoint& point);
     CommandResult SubmitPath(const JointPath& path);  // Completion is judged at the last waypoint.
     CommandResult SubmitTrajectory(const JointTrajectory& trajectory);  // Likewise, at the last knot.
     CommandResult Poll();

@@ -170,7 +170,8 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                 allowed.insert({"path_rad", "speed_scale", "max_velocity_rad_s", "max_acceleration_rad_s2",
                     "tolerance_rad"});
             }
-            if (op == "effector_position") allowed.insert({"positions", "duration_s"});
+            if (op == "arm_follow") allowed.insert({"target_rad", "speed_scale"});
+            if (op == "effector_position" || op == "effector_follow") allowed.insert({"positions", "duration_s"});
             if (op == "arm_jog") allowed.insert({"joint_index", "delta_rad", "speed_scale"});
             Keys(request, allowed);
             const auto deadline = request["deadline_ns"].as<std::int64_t>();
@@ -240,6 +241,12 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                             !request["wait_for_arrival"] || request["wait_for_arrival"].as<bool>(),
                             request["resend_interval_s"] ? request["resend_interval_s"].as<double>() : 0.0},
                             is_cancelled);
+                    } else if (op == "arm_follow") {
+                        result = session.FollowArm({request["target_rad"].as<std::vector<double>>(),
+                            request["speed_scale"].as<double>()});
+                    } else if (op == "effector_follow") {
+                        result = session.FollowEffector({request["positions"].as<std::vector<double>>(),
+                            request["duration_s"].as<double>()});
                     } else if (op == "arm_trajectory") {
                         std::vector<m::TimedEffectorPoint> schedule;
                         for (const auto& item : request["effector_schedule"]) {

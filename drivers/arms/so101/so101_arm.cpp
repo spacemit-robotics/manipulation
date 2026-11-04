@@ -125,7 +125,10 @@ public:
             ticks.push_back(target);
         }
         const auto state = Read();
-        CheckMode(state);
+        // The session decides whether a moving arm may take this target (it is settling from our own command).
+        if (!state.position_mode || state.fault) {
+            throw CommandRejected("SO101 requires fault-free position-mode feedback");
+        }
         if (!state.enabled) throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
         session_->Target(Ids(), ticks, Velocities(point.speed_scale));
     }

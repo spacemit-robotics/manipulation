@@ -41,12 +41,12 @@ sudo ip link set can0 up type can bitrate 1000000
 manipulation configure nero --variant revo2_right   # 仅机械臂时去掉 --variant；其他接口加 --set channel=can1
 manipulation inspect
 manipulation teach pose_01.json
-manipulation hand-move 0 0 0.3 0 0 0
+manipulation hand-move 1 1 0.7 1 1 1
 ```
 
 - **现场目录**：配置保存到 `SITE/device.yaml`，已有文件不覆盖。`SITE` 默认为 `~/.local/share/spacemit-manipulation/site/`，可用 `MANIPULATION_SITE` 或子命令前的 `--site DIR` 指定。
 - **只读命令**：`inspect` 读取状态，`teach` 记录静止姿态，都不运动。
-- **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出 `[0,1]` 位置（0 为张开），默认执行 2 s。Revo2 没有位置反馈，结果为 `unverified`（已下发并等完执行时间，未测量是否到位），起点未知时可能大幅动作。
+- **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出位置（`0` 闭合、`1` 张开，所有末端相同），默认执行 2 s。Revo2 没有位置反馈，结果为 `unverified`（已下发并等完执行时间，未测量是否到位），起点未知时可能大幅动作。
 
 机械臂须按厂商规程使能并处于位置模式。现场须有人看护、急停可达。Nero 失能或断电会坍塌，不以失能或断电代替软件停止。
 
@@ -124,6 +124,7 @@ with DeviceClient("manipulation-device", "examples/mock_device.yaml") as arm:
 ```
 
 - **失败处理**：运动失败时抛出 `DeviceCommandError`，`result` 字段含结果状态。
+- **目标跟随**：遥操作、视觉伺服等高频更新目标时用 `follow_arm()` / `follow_effector()`，发出目标即返回，结束时调用 `hold_arm()` 或 `move_arm()`。
 - **无反馈末端**：结果为 `unverified`，须传 `allow_unverified=True` 才接受。
 
 **运动学**（不访问设备，需要 `numpy`）：
@@ -203,6 +204,6 @@ tools/  tests/  docs/   辅助脚本、测试、参考文档
 - [开发指南](docs/development.md)：驱动约定、能力与工具扩展、测试。
 - SDK 应用 `application/native/dice_arena`：基于本组件的视觉抓杯与摇骰子游戏。
 
-## 许可
+## License
 
-本组件代码使用 [Apache-2.0](LICENSE)。厂商 SDK pyAgxArm 使用 LGPL-3.0（见 `components/thirdparty/pyagxarm`），Nero URDF 使用 MIT（见 `descriptions/robots/nero/LICENSE`），SO101 模型使用 Apache-2.0。
+本组件源码文件头声明为 Apache-2.0，最终以本目录 `LICENSE` 文件为准。第三方声明和衍生作品见 `NOTICE`。

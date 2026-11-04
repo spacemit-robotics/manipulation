@@ -139,7 +139,7 @@ def kinematics(context, args):
         tip = matrix(model.forward(joints, check_limits=False))
         print(json.dumps(dict(joints_rad=joints, position_m=tip[:3, 3].tolist(), rpy_rad=rpy(tip[:3, :3]))))
         return
-    target = pose(args.position, args.rpy)
+    target = pose([args.x, args.y, args.z], args.rpy)
     weight = args.orientation_weight if args.orientation_weight is not None else (1.0 if args.rpy else 0.0)
     described = context.describe(plan)
     limits = described["joint_limits_rad"]
@@ -249,7 +249,8 @@ def main():
         command.add_argument("--speed", type=float, default=0.05, help="controller speed scale in (0,1]")
         command.add_argument("--plan")
     move = commands.add_parser("hand-move", help="move every end-effector channel to an absolute position")
-    move.add_argument("positions", type=float, nargs="+", help="one value in [0,1] per channel, in channel order")
+    move.add_argument("positions", type=float, nargs="+",
+                      help="one value per channel, in channel order: 0 closed, 1 open")
     move.add_argument("--duration", type=float, default=2.0, help="execution time in seconds (default 2.0)")
     move.add_argument("--plan")
     hand = commands.add_parser("hand-step", help="move one end-effector channel by 0.01")
@@ -269,8 +270,8 @@ def main():
                        ("pose-move", "move the tip to a pose by joint motion"),
                        ("line-move", "move the tip along a straight line")):
         command = commands.add_parser(name, help=text)
-        command.add_argument("position", type=float, nargs=3, metavar=("X", "Y", "Z"),
-                             help="tip position in the base frame, metres")
+        for axis in "xyz":
+            command.add_argument(axis, type=float, help=f"tip {axis} in the base frame, metres")
         command.add_argument("--rpy", type=float, nargs=3, metavar=("ROLL", "PITCH", "YAW"),
                              help="tip orientation, radians (default: position only)")
         command.add_argument("--orientation-weight", type=float,
