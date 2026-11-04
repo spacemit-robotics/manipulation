@@ -27,7 +27,10 @@ public:
     void Disconnect() noexcept;
     ArmState Read();
     ArmState Diagnose();
+    ArmCapabilities GetCapabilities() const;
     void Enable();
+    void Disable();
+    CommandResult Hold();
     CommandResult Submit(const JointPoint& point);
     CommandResult SubmitPath(const JointPath& path);  // Completion is judged at the last waypoint.
     CommandResult SubmitTrajectory(const JointTrajectory& trajectory);  // Likewise, at the last knot.

@@ -22,6 +22,8 @@ bool Failed(Result status) {
 }
 constexpr double kToolArmDrift = 3.14159265358979323846 / 180;  // 1 degree
 }  // namespace
+void EndEffector::Enable() { throw CommandRejected("effector enable unsupported"); }
+void EndEffector::Disable() { throw CommandRejected("effector disable unsupported"); }
 void ValidateEffector(const EffectorConfig& config) {
     if (config.channels.empty()) return;
     Check(!config.device_id.empty() && config.channels.size() <= 32, "invalid effector identity/channels");
@@ -134,6 +136,12 @@ EffectorState DeviceSession::ReadEffector() {
     for (double value : state.positions) {
         Check(std::isfinite(value) && value >= 0 && value <= 1, "invalid normalized effector feedback");
     }
+    Check(state.loads.empty() || state.loads.size() == config.channels.size(), "effector load channel count mismatch");
+    for (double value : state.loads) {
+        Check(std::isfinite(value) && value >= -1 && value <= 1, "invalid normalized effector load");
+    }
+    Check(!state.holding.has_value() || p.effector->GetCapabilities().grasp_detection,
+        "effector reported holding without grasp detection");
     p.latched = p.latched || state.fault;
     return state;
 }
@@ -145,13 +153,85 @@ void DeviceSession::Diagnose() {
 }
 void DeviceSession::EnableArm() {
     Ready();
-    try { impl_->arm->Enable(); } catch (...) { impl_->latched = true; throw; }
+    try { impl_->arm->Enable(); }
+    catch (const CommandRejected&) { throw; }
+    catch (...) { impl_->latched = true; throw; }
+}
+void DeviceSession::DisableArm() {
+    Ready();
+    try { impl_->arm->Disable(); }
+    catch (const CommandRejected&) { throw; }
+    catch (...) { impl_->latched = true; throw; }
+}
+ArmCapabilities DeviceSession::GetArmCapabilities() const { return impl_->arm->GetCapabilities(); }
+EffectorCapabilities DeviceSession::GetEffectorCapabilities() const {
+    if (!HasEffector()) throw CommandRejected("no end effector configured");
+    return impl_->effector->GetCapabilities();
+}
+void DeviceSession::SetEffectorEnabled(bool enabled) {
+    Ready();
+    const auto capabilities = GetEffectorCapabilities();
+    if (!(enabled ? capabilities.enable : capabilities.disable)) {
+        throw CommandRejected(enabled ? "effector enable unsupported" : "effector disable unsupported");
+    }
+    const auto arm = ReadArm();
+    const auto tool = ReadEffector();
+    if (arm.fault || arm.moving || arm.command_active || tool.fault || tool.moving) {
+        throw CommandRejected("cannot change torque while arm or effector is faulted or moving");
+    }
+    try {
+        if (enabled) impl_->effector->Enable();
+        else impl_->effector->Disable();
+        const auto state = ReadEffector();
+        Check(state.enabled.has_value() && *state.enabled == enabled, "effector torque state not confirmed");
+    } catch (const CommandRejected&) { throw; }
+    catch (...) { impl_->latched = true; throw; }
+}
+void DeviceSession::EnableEffector() { SetEffectorEnabled(true); }
+void DeviceSession::DisableEffector() { SetEffectorEnabled(false); }
+CommandResult DeviceSession::HoldArm() {
+    Check(impl_->connected, "not connected");
+    CommandResult result;
+    try { result = impl_->arm->Hold(); }
+    catch (...) {
+        impl_->latched = impl_->latched || Failed(impl_->arm->GetResult().status);
+        throw;
+    }
+    impl_->latched = impl_->latched || Failed(result.status) || Failed(impl_->arm->GetResult().status);
+    result.command_id = ++impl_->command_id;
+    return result;
+}
+CommandResult DeviceSession::HoldEffector() {
+    auto& p = *impl_;
+    Check(p.connected, "not connected");
+    if (!GetEffectorCapabilities().verified_hold || p.definition.effector.feedback == EffectorFeedback::kNone) {
+        throw CommandRejected("verified effector hold unsupported");
+    }
+    const auto state = ReadEffector();
+    if (state.enabled.has_value() && !*state.enabled) throw CommandRejected("cannot hold a disabled effector");
+    bool confirmed = false;
+    try { confirmed = p.effector->Hold(); }
+    catch (const CommandRejected&) { throw; }
+    catch (...) {}
+    p.latched = p.latched || !confirmed;
+    return {++p.command_id, confirmed ? Result::kSucceeded : Result::kStopUnknown,
+        confirmed ? "effector_hold_confirmed" : "effector hold unconfirmed; inspect before reconnecting"};
 }
 bool DeviceSession::HasEffector() const { return impl_->effector != nullptr; }
 bool DeviceSession::Latched() const { return impl_->latched; }
 const DeviceDefinition& DeviceSession::Definition() const { return impl_->definition; }
 CommandResult DeviceSession::MoveArm(const JointPoint& point, const std::function<bool()>& cancelled) {
     return RunArm([&] { return impl_->arm->Submit(point); }, cancelled);
+}
+CommandResult DeviceSession::JogArm(std::size_t joint_index, double delta_rad, double speed_scale,
+    const std::function<bool()>& cancelled) {
+    Ready();
+    if (joint_index >= impl_->definition.arm.joints.size() || !std::isfinite(delta_rad)) {
+        throw CommandRejected("invalid joint index or nonfinite step");
+    }
+    auto target = ReadArm().joints_rad;
+    target[joint_index] += delta_rad;
+    return MoveArm({target, speed_scale}, cancelled);
 }
 CommandResult DeviceSession::MoveArmPath(const JointPath& path, const std::function<bool()>& cancelled) {
     return RunArm([&] { return impl_->arm->SubmitPath(path); }, cancelled);
@@ -184,6 +264,8 @@ CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit
     if (p.effector) {
         const auto tool = ReadEffector();
         Check(!tool.fault && !tool.moving, "effector faulted or busy before arm motion");
+        Check(effector.empty() || !tool.enabled.has_value() || *tool.enabled,
+            "effector disabled before scheduled targets");
     }
     auto result = submit();
     const auto started = Clock::now();
@@ -198,7 +280,9 @@ CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit
             if (result.status == Result::kRunning) result = cancel ? p.arm->Cancel() : p.arm->Poll();
             const bool arm_ok = result.status == Result::kRunning || result.status == Result::kSucceeded;
             if (arm_ok && !cancel && sent < effector.size() && Clock::now() >= after(effector[sent].at_s)) {
-                Check(!ReadEffector().fault, "effector fault during timed targets");
+                const auto tool = ReadEffector();
+                Check(!tool.fault && (!tool.enabled.has_value() || *tool.enabled),
+                    "effector fault or disabled during timed targets");
                 p.effector->Submit(effector[sent].point);  // One per cycle: late targets are never burst.
                 settled = Clock::now() + std::chrono::duration_cast<Clock::duration>(
                     std::chrono::duration<double>(effector[sent].point.duration_s));
@@ -255,6 +339,7 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point, const std:
     const double allowed = distance(arm.joints_rad) + kToolArmDrift;
     const auto before = ReadEffector();
     Check(!before.fault && !before.moving, "effector faulted or busy");
+    Check(!before.enabled.has_value() || *before.enabled, "effector disabled");
     const bool open_loop = p.definition.effector.feedback == EffectorFeedback::kNone;
     Check(!open_loop || point.duration_s <= p.definition.effector.timeout_s,
         "effector duration exceeds timeout_s");
@@ -267,6 +352,7 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point, const std:
     CommandResult result{++p.command_id, Result::kRunning, "awaiting fresh effector feedback"};
     std::uint64_t last = before.sample_id;
     unsigned settled = 0;
+    unsigned gripping = 0;  // Fresh samples stopped on an object (drivers with grasp detection).
     bool written = false;
     try {
         p.effector->Submit(point);
@@ -295,7 +381,10 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point, const std:
                     reached = reached && std::abs(state.positions[i] - point.positions[i]) <= p.definition.effector.tolerance;
                 }
                 settled = reached ? settled + 1 : 0;
+                gripping = !state.moving && state.holding.value_or(false) ? gripping + 1 : 0;
                 if (settled >= 3) return {result.command_id, Result::kSucceeded, "effector_position_reached"};
+                // Stopped on an object short of a closing target: a grasp, not a failure to reach.
+                if (gripping >= 3) return {result.command_id, Result::kSucceeded, "effector_grasp_holding"};
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }

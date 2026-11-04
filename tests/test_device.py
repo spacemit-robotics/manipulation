@@ -98,6 +98,7 @@ class DeviceTests(unittest.TestCase):
     def test_describe_is_offline_metadata(self):
         described = json.loads(self.cli("describe", str(self.filename)).stdout)
         self.assertEqual(described.pop("joint_limits_rad"), [[-1, 1], [-1, 1]])
+        self.assertEqual(described.pop("arm_timeout_s"), self.plan["device"]["arm"].get("timeout_s", 5))
         self.assertEqual(described, dict(driver="mock_device", model="", joints=["j1", "j2"],
                                          channels=["a", "b", "c", "d", "e", "f"], effector_feedback="position"))
 

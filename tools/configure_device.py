@@ -20,8 +20,9 @@ PLACEHOLDER = re.compile(r"\$\{([a-z_][a-z0-9_]*)(?::-([^}]*))?\}")
 def templates(prefix, layout, model):
     directory = prefix / layout["datadir"] / "manipulation/descriptions/robots" / model / "devices"
     if not directory.is_dir():
-        available = sorted(path.parent.parent.name for path in
-                           (prefix / layout["datadir"] / "manipulation/descriptions/robots").glob("*/devices"))
+        available = sorted(path.parent.name for path in
+                           (prefix / layout["datadir"] / "manipulation/descriptions/robots").glob("*/devices")
+                           if path.is_dir())
         raise ValueError(f"no device templates for model {model!r}; available: {', '.join(available) or 'none'}")
     return directory
 
@@ -54,7 +55,7 @@ def configure(prefix, model, output, variant="arm", values=None, python="python3
     drivers = subprocess.run([str(binary), "drivers"], check=True, capture_output=True, text=True).stdout.split()
     if not driver or driver.group(1) not in drivers:
         raise ValueError(f"this installation does not include driver {driver.group(1) if driver else '?'}; "
-                         "rebuild with the matching driver option (mm -DMANIPULATION_ENABLE_NERO=ON)")
+                         "rebuild with the matching driver module enabled")
     if output.exists():
         raise FileExistsError(f"{output} already exists; review or remove it before configuring again")
     output.parent.mkdir(parents=True, exist_ok=True)

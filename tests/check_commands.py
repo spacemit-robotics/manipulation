@@ -58,11 +58,13 @@ def check(prefix):
         root = Path(temporary)
         site, source = root / "site", root / "algorithms"
 
-        def command(name, *arguments, expected=0, stdin=None):
+        def command(name, *arguments, expected=0, stdin=None, error=None):
             result = subprocess.run([str(binary / name), "--site", str(site), *map(str, arguments)],
                                     cwd=root, env=environment, input=stdin, capture_output=True, text=True, timeout=30)
             if result.returncode != expected:
                 raise AssertionError(str(arguments) + "\n" + result.stdout + result.stderr)
+            if error is not None and error not in result.stderr:
+                raise AssertionError(str(arguments) + "\n" + result.stderr)
             return result.stdout
 
         for name in ("manipulation", "hand-eye", "cup-shake", "dice-arena"):
@@ -71,8 +73,9 @@ def check(prefix):
         assert '"status":"succeeded"' in command("manipulation", "demo")
         assert command("cup-shake", "mock").count('"status": "completed"') == 3
         assert command("dice-arena", "mock").count('"status": "completed"') == 3
-        command("manipulation", "configure", "unknown_model", expected=2)
-        command("manipulation", "configure", "nero", "--variant", "missing", expected=2)
+        command("manipulation", "configure", "unknown_model", expected=2, error="available: nero")
+        command("manipulation", "configure", "nero", "--variant", "missing", expected=2,
+                error="available: arm, revo2_right")
         command("manipulation", "validate", expected=2)  # No site device.yaml yet.
         command("manipulation", "configure", "nero", "--variant", "revo2_right", "--set", "channel=can1")
         device = (site / "device.yaml").read_text()
@@ -117,6 +120,20 @@ def check(prefix):
         command("manipulation", "teach", "pose.json")
         command("manipulation", "teach", "pose.json", expected=2)
         command("manipulation", "fk", "pose.json")
+        # Cartesian tools on the Mock (all joints 0 at each connection): read-only pose and IK, then moves.
+        tip = json.loads(command("manipulation", "pose"))["position_m"]
+        offset = [tip[0] + 0.02, tip[1], tip[2] - 0.01]
+        assert json.loads(command("manipulation", "ik", *offset))["converged"]
+        assert json.loads(command("manipulation", "ik", *offset, "--seed-pose", "pose.json"))["converged"]
+        command("manipulation", "ik", 3, 0, 0, expected=2, error="no joint solution")
+        command("manipulation", "pose-move", 3, 0, 0, expected=2, error="nothing moved")
+        assert "'status': 'succeeded'" in command("manipulation", "pose-move", *offset)
+        output = command("manipulation", "line-move", *offset, "--step-mm", 5)
+        assert "5 waypoints" in output and "'status': 'succeeded'" in output, output
+        command("manipulation", "hand-grasp", expected=2, error="no grasp evidence")  # The Mock hand has none.
+        output = command("manipulation", "monitor", "--count", 3, "--rate", 20)
+        assert output.count("joints_deg") == 3 and "pinky_finger 0.000" in output, output
+        command("manipulation", "monitor", "--rate", 50, expected=2)
 
         values = dataset()
         write(site / "calibration_01/dataset.json", values)

@@ -53,12 +53,21 @@
 | `Read` | 返回完整的一次采样：全部关节、状态标志、接收时间、样本号；缺帧或过期时抛出异常。`moving` 表示关节实际在动，不是“未到达目标” |
 | `Diagnose` | 主动查询固件等参数，不运动 |
 | `Enable` | 显式使能，仅在 `GetCapabilities().enable` 为真时调用 |
+| `Disable` | 显式释放扭矩，仅在 `disable` 能力为真时调用；不能作为停止的替代 |
 | `Submit` | 下发目标即返回，不等待完成；目标单位 rad，`speed_scale` 为控制器倍率 |
 | `SubmitPath`（可选） | 连续路径，下发即返回；`GetCapabilities().joint_path` 为真时调用。`tolerance_rad` 已由会话确定。执行期间 `Read` 须报告 `moving`，`Hold` 须先停止发送 |
 | `Hold` | 新鲜反馈确认静止后返回 true；不以断电或失能代替；无法确认返回 false |
 
-末端 `EndEffector::Read` 在配置为 `feedback: none` 时只返回在线样本（`positions` 为空）：
-设备在总线上有新鲜数据即可，不得用命令值冒充位置。会话据此开环执行，结果为 `unverified`。
+末端执行器 `EndEffector` 另需遵守：
+
+- `feedback: none` 时 `Read` 只返回在线样本（`positions` 为空），不得用命令值冒充位置；会话据此开环执行，结果为 `unverified`。
+- `EffectorState::enabled` 未知时保留 `std::nullopt`；声明 `enable` / `disable` 能力的驱动必须能读回扭矩状态。
+- `EffectorState::loads` 可报告各通道负载（`[-1,1]`），不支持时留空。
+- 声明 `grasp_detection` 的驱动在 `EffectorState::holding` 报告抓握判断：闭合目标未到达、已停止且有负载证据时为真。
+  会话把连续三个这样的样本视为抓取成功（`effector_grasp_holding`）；`Hold` 不得为此改写闭合目标而松开物体。
+  未声明该能力的驱动不得设置 `holding`。
+
+使能时先写入并读回当前位置目标，再改变扭矩，避免设备恢复保存的旧目标（参考 SO101 驱动）。
 
 异常规则：
 
@@ -72,7 +81,9 @@
 ### 共享连接
 
 臂和手共用一个控制器连接时，由同一个组合驱动创建两者并共享连接对象，参考
-`drivers/common/agx_session/`。厂商 SDK 运行在独立 worker 进程时：
+`drivers/common/agx_session/` 或 `drivers/common/so101_session/`。
+SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件的公开接口：`motor_alloc_uart` 打开串口，`motor_get_paras` / `motor_set_paras` 读写寄存器。不调用 `motor_init`（它每次连接都改写 EEPROM 中的工作模式）；`motor_set_paras` 不报告丢失的写入，所以每次写入后都读回确认。
+厂商 SDK 运行在独立 worker 进程时：
 
 - worker 只开放固定操作，不接受任意方法名。
 - worker 忽略 SIGINT 和 SIGTERM，并放入独立进程组，只在所有者关闭通道后退出。
@@ -142,7 +153,8 @@
 - C++ 应用直接使用 `DeviceSession`；Python 应用使用 `DeviceClient`。
 - 简单的顺序点位放在 `device.yaml` 的 `steps`；判断、重试、取消和恢复写在应用代码中。
 - 应用配置中的路径相对配置文件解析，便于整体迁移。
-- 结果区分命令完成、位置到位和实物抓稳；`physical_grip_verified` 只能由实际的抓持证据置为真。
+- 结果区分命令完成、位置到位和实物抓稳；`physical_grip_verified` 只能由实际的抓持证据（如驱动的抓握判断）置为真。
+- 末端位姿目标用 `spacemit_manipulation.urdf_ik` 求逆解，`converged` 为真后再交给 `DeviceClient` 执行。
 
 ## 7. 验证
 

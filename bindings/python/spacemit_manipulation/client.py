@@ -21,9 +21,10 @@ class DeviceClient:
     The device process holds the host-wide lease for the plan's resource_id until close().
     """
 
-    def __init__(self, executable, plan, *, allow_motion=True, allow_enable=False):
-        if allow_enable and not allow_motion:
-            raise ValueError("enable permission also requires motion permission")
+    def __init__(self, executable, plan, *, allow_motion=True, allow_enable=False,
+                 allow_disable=False, allow_effector_enable=False, allow_effector_disable=False):
+        if not allow_motion and any((allow_enable, allow_disable, allow_effector_enable, allow_effector_disable)):
+            raise ValueError("torque permissions also require motion permission")
         self._condition = threading.Condition()
         self._write_lock = threading.Lock()
         self._command_lock = threading.Lock()
@@ -40,6 +41,12 @@ class DeviceClient:
             command.append("--read-only")
         if allow_enable:
             command.append("--enable")
+        if allow_disable:
+            command.append("--allow-disable")
+        if allow_effector_enable:
+            command.append("--allow-effector-enable")
+        if allow_effector_disable:
+            command.append("--allow-effector-disable")
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                         text=True, encoding="utf-8", bufsize=1)
         self._reader = threading.Thread(target=self._read, daemon=True)
@@ -149,6 +156,41 @@ class DeviceClient:
 
     def diagnose(self, **kwargs):
         return self.call("diagnose", **kwargs)
+
+    def capabilities(self, **kwargs):
+        """Return driver capabilities; unsupported operations are never emulated."""
+        return self.call("capabilities", **kwargs)
+
+    def enable_arm(self, **kwargs):
+        """Explicitly enable the arm; requires allow_enable at construction."""
+        return self._motion("enable", **kwargs)
+
+    def disable_arm(self, **kwargs):
+        """Release arm torque; requires allow_disable and driver support."""
+        return self._motion("disable", **kwargs)
+
+    def enable_effector(self, **kwargs):
+        """Explicitly enable the tool; requires allow_effector_enable."""
+        return self._motion("effector_enable", **kwargs)
+
+    def disable_effector(self, **kwargs):
+        """Release tool torque; requires allow_effector_disable."""
+        return self._motion("effector_disable", **kwargs)
+
+    def hold_arm(self, **kwargs):
+        """Request a feedback-confirmed hold without releasing torque or clearing faults."""
+        return self._motion("arm_hold", **kwargs)
+
+    def hold_effector(self, **kwargs):
+        """Request a feedback-confirmed tool hold; open-loop tools reject this operation."""
+        return self._motion("effector_hold", **kwargs)
+
+    def jog_arm(self, joint_index, delta_rad, speed_scale=0.05, **kwargs):
+        """Step one zero-based joint relative to fresh feedback, applying normal joint limits."""
+        if type(joint_index) is not int or joint_index < 0:
+            raise ValueError("joint_index must be a nonnegative integer")
+        return self._motion("arm_jog", joint_index=joint_index, delta_rad=delta_rad,
+                            speed_scale=speed_scale, **kwargs)
 
     def move_arm(self, target_rad, speed_scale, *, tolerance_rad=0.0, wait_for_arrival=True, resend_interval_s=0.0,
                  **kwargs):

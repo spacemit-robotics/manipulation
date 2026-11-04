@@ -87,7 +87,10 @@ class NeroIntegrationTests(unittest.TestCase):
 
     def test_release_registration(self):
         result = subprocess.run([CLI, "drivers"], capture_output=True, text=True, check=True)
-        self.assertEqual(set(result.stdout.split()), {"mock_device", "agx_nero_revo2"})
+        expected = {"mock_device", "agx_nero_revo2"}
+        if os.environ.get("MANIPULATION_TEST_SO101") == "1":
+            expected.add("so101")
+        self.assertEqual(set(result.stdout.split()), expected)
 
     def test_validation_never_imports_sdk_or_spawns(self):
         self.options.update(sdk_root="/missing/sdk", python="/missing/python")

@@ -83,6 +83,7 @@ struct ArmCapabilities {
     double minimum_speed_scale = 0;  // Driver constraint; strict positivity still required.
     bool joint_path = false;
     bool joint_trajectory = false;
+    bool disable = false;  // Explicit torque release, never used by Hold().
 };
 
 // Nominal duration of a JointPath profile starting at start_rad (s).
@@ -98,6 +99,7 @@ public:
     virtual ArmState Read() = 0;
     virtual ArmState Diagnose();  // Explicit active parameter/firmware queries, no motion.
     virtual void Enable();  // Explicit operation; default: unsupported.
+    virtual void Disable();  // Explicit torque release; default: rejected without a write.
     virtual void Submit(const JointPoint& point) = 0;  // Acceptance, not completion.
     virtual void SubmitPath(const JointPath& path);  // Acceptance; default: rejected, nothing written.
     virtual void SubmitTrajectory(const JointTrajectory& trajectory);  // Same; default: rejected.

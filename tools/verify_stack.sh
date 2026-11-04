@@ -6,6 +6,10 @@ set -euo pipefail
 SDK_ROOT="$(cd "$(dirname "$(realpath -- "${BASH_SOURCE[0]}")")/../../../.." && pwd -P)"
 cd "${SDK_ROOT}"
 STACK_BUILD="$(realpath -m -- "${1:-${SDK_ROOT}/output/manipulation-dev}")"
+# Every run installs into an empty prefix: files left by an earlier layout (for example a former
+# share/cup_shake directory) must not change what the installation checks see.
+[[ "${STACK_BUILD}" != "/" ]] || { echo "verify_stack: the build directory must not be /" >&2; exit 2; }
+rm -rf -- "${STACK_BUILD}/install"
 # Tests use a private lease directory so they never contend with programs on this host.
 export MANIPULATION_LOCK_DIRECTORY="${STACK_BUILD}/locks"
 export PYTHONDONTWRITEBYTECODE=1

@@ -7,6 +7,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,11 @@ struct EffectorState {
     bool moving = false;
     bool fault = false;
     std::string side;
+    std::optional<bool> enabled = std::nullopt;  // Unknown when the device does not report torque state.
+    // Per-channel load in [-1,1] of the device's rated output (sign: drive direction); empty if unknown.
+    std::vector<double> loads{};
+    // Grasp evidence from a driver with grasp_detection: stopped short of a closing target on load.
+    std::optional<bool> holding = std::nullopt;
 };
 struct EffectorPoint {
     std::vector<double> positions;  // Per-channel normalized [0,1].
@@ -46,6 +52,10 @@ struct TimedEffectorPoint {
 struct EffectorCapabilities {
     bool verified_hold = false;
     double maximum_duration_s = 120;
+    bool enable = false;
+    bool disable = false;
+    // The driver reports holding: a closing move that stops on an object completes as a grasp.
+    bool grasp_detection = false;
 };
 class EndEffector {
 public:
@@ -54,6 +64,8 @@ public:
     virtual void Connect() = 0;
     virtual void Disconnect() noexcept = 0;
     virtual EffectorState Read() = 0;
+    virtual void Enable();  // Explicit operation; default: rejected without a write.
+    virtual void Disable();  // Explicit torque release; never used to hold or cancel.
     virtual void Submit(const EffectorPoint& point) = 0;
     virtual bool Hold() { return false; }  // Unsupported is never a verified stop.
 };
@@ -105,7 +117,18 @@ public:
     ArmState ReadArm();
     EffectorState ReadEffector();
     void Diagnose();
-    void EnableArm();  // Explicit opt-in only. No disable/clear/home API.
+    ArmCapabilities GetArmCapabilities() const;  // No connection or device write required.
+    EffectorCapabilities GetEffectorCapabilities() const;  // Rejects arm-only assemblies.
+    void EnableArm();  // Explicit opt-in only; no implicit enable on connection or motion.
+    void DisableArm();  // Explicit torque release; unsupported drivers reject without writing.
+    void EnableEffector();
+    void DisableEffector();
+    // Hold preserves torque. Fault latches permit an attempt but are never cleared by success.
+    CommandResult HoldArm();
+    CommandResult HoldEffector();
+    // Relative step of one zero-based joint, using the same limits and validation as MoveArm.
+    CommandResult JogArm(std::size_t joint_index, double delta_rad, double speed_scale = 0.05,
+        const std::function<bool()>& cancelled = {});
     CommandResult MoveArm(const JointPoint& point, const std::function<bool()>& cancelled = {});
     // Continuous motion through the waypoints (drivers with the joint_path capability).
     CommandResult MoveArmPath(const JointPath& path, const std::function<bool()>& cancelled = {});
@@ -123,6 +146,7 @@ private:
     CommandResult RunArm(const std::function<CommandResult()>& submit, const std::function<bool()>& cancelled,
         const std::vector<TimedEffectorPoint>& effector = {});
     void CheckEffectorPoint(const EffectorPoint& point) const;
+    void SetEffectorEnabled(bool enabled);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

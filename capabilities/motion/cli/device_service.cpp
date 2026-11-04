@@ -60,8 +60,25 @@ std::int64_t Now() {
 }
 }  // namespace
 std::string JsonString(const std::string& text) { return Quote(text); }
+std::string DeviceCapabilitiesJson(const m::DeviceSession& session) {
+    const auto arm = session.GetArmCapabilities();
+    std::ostringstream out;
+    out << std::boolalpha << std::setprecision(17) << "{\"arm\":{\"joint_point\":" << arm.joint_point
+        << ",\"joint_path\":" << arm.joint_path << ",\"joint_trajectory\":" << arm.joint_trajectory
+        << ",\"enable\":" << arm.enable << ",\"disable\":" << arm.disable
+        << ",\"verified_hold\":" << arm.verified_hold
+        << ",\"minimum_speed_scale\":" << arm.minimum_speed_scale << "},\"effector\":";
+    if (session.HasEffector()) {
+        const auto tool = session.GetEffectorCapabilities();
+        out << "{\"enable\":" << tool.enable << ",\"disable\":" << tool.disable
+            << ",\"verified_hold\":" << tool.verified_hold << ",\"grasp_detection\":" << tool.grasp_detection
+            << ",\"maximum_duration_s\":" << tool.maximum_duration_s << '}';
+    } else { out << "null"; }
+    return out.str() + '}';
+}
 int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
-    const std::function<bool()>& interrupted, const std::string& driver) {
+    const std::function<bool()>& interrupted, const std::string& driver, bool allow_disable,
+    bool allow_effector_enable, bool allow_effector_disable) {
     std::mutex mutex, output_mutex;
     std::condition_variable changed;
     std::deque<YAML::Node> pending;
@@ -154,6 +171,7 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                     "tolerance_rad"});
             }
             if (op == "effector_position") allowed.insert({"positions", "duration_s"});
+            if (op == "arm_jog") allowed.insert({"joint_index", "delta_rad", "speed_scale"});
             Keys(request, allowed);
             const auto deadline = request["deadline_ns"].as<std::int64_t>();
             if (Now() >= deadline) throw std::runtime_error("request expired before dispatch");
@@ -161,7 +179,9 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                 return stopped || interrupted() || cancelled == id || Now() >= deadline;
             };
             std::string data;
-            if (op == "state" || op == "diagnose") {
+            if (op == "capabilities") {
+                data = DeviceCapabilitiesJson(session);
+            } else if (op == "state" || op == "diagnose") {
                 if (op == "diagnose") session.Diagnose();
                 const auto arm = session.ReadArm();
                 data = "{\"joints_rad\":" + Values(arm.joints_rad) + ",\"enabled\":" +
@@ -176,17 +196,44 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                     const bool measured = session.Definition().effector.feedback == m::EffectorFeedback::kPosition;
                     data += ",\"effector_feedback\":" + Quote(measured ? "position" : "none") +
                         ",\"effector_positions\":" + Values(tool.positions) +
-                        ",\"effector_fault\":" + (tool.fault ? "true" : "false");
+                        ",\"effector_fault\":" + (tool.fault ? "true" : "false") +
+                        ",\"effector_enabled\":" +
+                        (tool.enabled.has_value() ? (*tool.enabled ? "true" : "false") : "null") +
+                        ",\"effector_loads\":" + Values(tool.loads) + ",\"effector_holding\":" +
+                        (tool.holding.has_value() ? (*tool.holding ? "true" : "false") : "null");
                 }
                 data += '}';
             } else {
-                if (!allow_motion || deadline_latched) throw std::runtime_error("motion forbidden or deadline latched");
+                const bool holding = op == "arm_hold" || op == "effector_hold";
+                if (!allow_motion || (deadline_latched && !holding)) {
+                    throw std::runtime_error("motion forbidden or deadline latched");
+                }
                 if (op == "enable") {
                     if (!allow_enable) throw std::runtime_error("enable requires explicit --enable permission");
                     session.EnableArm(); data = "{\"status\":\"succeeded\"}";
+                } else if (op == "disable") {
+                    if (!allow_disable) throw std::runtime_error("disable requires --allow-disable permission");
+                    session.DisableArm(); data = "{\"status\":\"succeeded\"}";
+                } else if (op == "effector_enable") {
+                    if (!allow_effector_enable) {
+                        throw std::runtime_error("effector enable requires --allow-effector-enable permission");
+                    }
+                    session.EnableEffector(); data = "{\"status\":\"succeeded\"}";
+                } else if (op == "effector_disable") {
+                    if (!allow_effector_disable) {
+                        throw std::runtime_error("effector disable requires --allow-effector-disable permission");
+                    }
+                    session.DisableEffector(); data = "{\"status\":\"succeeded\"}";
                 } else {
                     m::CommandResult result;
-                    if (op == "arm_point") {
+                    if (op == "arm_hold") {
+                        result = session.HoldArm();
+                    } else if (op == "effector_hold") {
+                        result = session.HoldEffector();
+                    } else if (op == "arm_jog") {
+                        result = session.JogArm(request["joint_index"].as<std::size_t>(),
+                            request["delta_rad"].as<double>(), request["speed_scale"].as<double>(), is_cancelled);
+                    } else if (op == "arm_point") {
                         result = session.MoveArm({request["target_rad"].as<std::vector<double>>(),
                             request["speed_scale"].as<double>(),
                             request["tolerance_rad"] ? request["tolerance_rad"].as<double>() : 0.0,
@@ -217,7 +264,9 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                             request["duration_s"].as<double>()}, is_cancelled);
                     } else { throw std::runtime_error("unsupported operation"); }
                     data = "{\"status\":" + Quote(m::ResultName(result.status)) +
-                        ",\"detail\":" + Quote(result.detail) + ",\"physical_grip_verified\":false}";
+                        ",\"detail\":" + Quote(result.detail) + ",\"physical_grip_verified\":" +
+                        // Only measured grasp evidence (stopped on an object under load) verifies a grip.
+                        (result.detail == "effector_grasp_holding" ? "true" : "false") + '}';
                 }
             }
             if (Now() >= deadline) {

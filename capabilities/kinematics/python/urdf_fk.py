@@ -52,7 +52,7 @@ def vector(element, name, default):
 
 
 class UrdfKinematics:
-    """Explicit base/tip and joint order; no mesh, collision, IK or dynamics claims."""
+    """Explicit base/tip and joint order; no mesh, collision or dynamics claims (IK: urdf_ik)."""
 
     def __init__(self, filename, base, tip, joint_names):
         if Path(filename).stat().st_size > 2 * 1024 * 1024:
@@ -77,13 +77,30 @@ class UrdfKinematics:
         if active != self.names or any(joint.get("type") not in ("fixed", "revolute") for joint in chain):
             raise ValueError("unsupported chain or mismatched joint order")
 
+    @property
+    def limits(self):
+        """URDF (lower, upper) limits of the active joints, in joint order."""
+        result = []
+        for joint in self.chain:
+            if joint.get("type") == "revolute":
+                limit = joint.find("limit")
+                if limit is None:
+                    raise ValueError("URDF joint limit missing")
+                result.append((float(limit.get("lower")), float(limit.get("upper"))))
+        return result
+
     def forward(self, joints_rad, check_limits=True):
         """Flange pose as a row-major 4x4 list. Measured joints may sit slightly past the URDF
         limits (the controller allows them), so pose measurement passes check_limits=False."""
+        return self.frames(joints_rad, check_limits)[0]
+
+    def frames(self, joints_rad, check_limits=True):
+        """The tip pose and, per active joint, its origin and unit axis in the base frame."""
         if len(joints_rad) != len(self.names) or not all(math.isfinite(v) for v in joints_rad):
             raise ValueError("invalid joint vector")
         angles = dict(zip(self.names, joints_rad))
         pose = identity()
+        joints = []
         for joint in self.chain:
             origin = joint.find("origin")
             offset = identity()
@@ -101,5 +118,9 @@ class UrdfKinematics:
                                      not float(limit.get("lower")) <= angle <= float(limit.get("upper"))):
                     raise ValueError("URDF joint limit exceeded")
                 axis = joint.find("axis")
-                pose = multiply(pose, rotation(vector(axis, "xyz", "1 0 0") if axis is not None else [1, 0, 0], angle))
-        return pose
+                axis = vector(axis, "xyz", "1 0 0") if axis is not None else [1, 0, 0]
+                length = math.sqrt(sum(value * value for value in axis))
+                world = [sum(pose[row * 4 + k] * axis[k] for k in range(3)) / length for row in range(3)]
+                joints.append(([pose[3], pose[7], pose[11]], world))
+                pose = multiply(pose, rotation(axis, angle))
+        return pose, joints

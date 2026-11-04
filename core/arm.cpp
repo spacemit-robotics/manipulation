@@ -72,7 +72,8 @@ struct ArmSession::Impl {
     bool settling = false;
 };
 
-void Arm::Enable() { throw std::runtime_error("enable unsupported"); }
+void Arm::Enable() { throw CommandRejected("enable unsupported"); }
+void Arm::Disable() { throw CommandRejected("disable unsupported"); }
 ArmState Arm::Diagnose() { return Read(); }
 void Arm::SubmitPath(const JointPath&) { throw CommandRejected("joint path unsupported"); }
 void Arm::SubmitTrajectory(const JointTrajectory&) { throw CommandRejected("joint trajectory unsupported"); }
@@ -176,19 +177,66 @@ ArmState ArmSession::Diagnose() {
     return Read();
 }
 
+ArmCapabilities ArmSession::GetCapabilities() const { return impl_->arm->GetCapabilities(); }
+
 void ArmSession::Enable() {
     Ready();
+    if (!GetCapabilities().enable) throw CommandRejected("enable unsupported");
     const auto state = Read();
-    Check(!state.fault && !state.moving, "cannot enable faulted or moving arm");
-    Check(impl_->arm->GetCapabilities().enable, "enable unsupported");
+    if (state.fault || state.moving || state.command_active) {
+        throw CommandRejected("cannot enable faulted or moving arm");
+    }
     try {
         impl_->arm->Enable();
         Check(Read().enabled, "enable not confirmed");
-    } catch (...) {
+    } catch (const CommandRejected&) { throw; }
+    catch (...) {
         impl_->result.status = Result::kFault;
         impl_->result.detail = "enable failed or unconfirmed; inspect before reconnecting";
         throw;
     }
+}
+
+void ArmSession::Disable() {
+    Ready();
+    if (!GetCapabilities().disable) throw CommandRejected("disable unsupported");
+    const auto state = Read();
+    if (state.fault || state.moving || state.command_active) {
+        throw CommandRejected("cannot disable faulted or moving arm");
+    }
+    try {
+        impl_->arm->Disable();
+        Check(!Read().enabled, "disable not confirmed");
+    } catch (const CommandRejected&) { throw; }
+    catch (...) {
+        impl_->result.status = Result::kFault;
+        impl_->result.detail = "disable failed or unconfirmed; inspect before reconnecting";
+        throw;
+    }
+}
+
+CommandResult ArmSession::Hold() {
+    auto& p = *impl_;
+    Check(p.connected, "not connected");
+    if (!GetCapabilities().verified_hold) throw CommandRejected("verified arm hold unsupported");
+    const auto state = Read();
+    if (state.fault) {
+        p.result.status = Result::kFault;
+        p.result.detail = "arm fault observed before hold";
+    }
+    if (!state.enabled) throw CommandRejected("cannot hold a disabled arm");
+    bool confirmed = false;
+    try { confirmed = p.arm->Hold(); }
+    catch (const CommandRejected&) { throw; }
+    catch (...) {}  // A failed hold cannot establish a physical stop.
+    CommandResult result{p.result.command_id + 1,
+        confirmed ? Result::kSucceeded : Result::kStopUnknown,
+        confirmed ? "arm_hold_confirmed" : "arm hold unconfirmed; inspect before reconnecting"};
+    const bool latched = p.result.status == Result::kFault || p.result.status == Result::kTimedOut ||
+        p.result.status == Result::kStopUnknown;
+    if (!confirmed || !latched) p.result = result;
+    if (confirmed) p.settling = false;
+    return result;
 }
 
 void ArmSession::CheckTarget(const std::vector<double>& target_rad, double speed_scale) {

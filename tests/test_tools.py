@@ -25,6 +25,32 @@ def module(name, path):
 
 fk = module("spacemit_manipulation.urdf_fk", "capabilities/kinematics/python/urdf_fk.py")
 work = module("spacemit_manipulation.workbench", "capabilities/calibration/cli/workbench.py")
+configuration = module("manipulation_configure_device", "tools/configure_device.py")
+
+
+class ConfigurationTests(unittest.TestCase):
+    def test_missing_model_lists_sorted_model_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            robots = prefix / "share/manipulation/descriptions/robots"
+            for model in ("beta_arm", "alpha_arm"):
+                (robots / model / "devices").mkdir(parents=True)
+            (robots / "not_a_model").mkdir()
+            (robots / "not_a_model/devices").write_text("not a directory")
+            with self.assertRaisesRegex(ValueError, "available: alpha_arm, beta_arm$"):
+                configuration.templates(prefix, {"datadir": "share"}, "ROBOT_MODEL")
+
+    def test_known_model_template_directory_is_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            prefix = Path(temporary)
+            expected = prefix / "share/manipulation/descriptions/robots/alpha_arm/devices"
+            expected.mkdir(parents=True)
+            self.assertEqual(configuration.templates(prefix, {"datadir": "share"}, "alpha_arm"), expected)
+
+    def test_no_installed_model_reports_none(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaisesRegex(ValueError, "available: none$"):
+                configuration.templates(Path(temporary), {"datadir": "share"}, "missing")
 
 
 class DependencyTests(unittest.TestCase):
@@ -60,8 +86,10 @@ done < <(resolve_nonros2_dependency_closure "$2" 1)
                 ("components/thirdparty/pyagxarm", ["components/thirdparty/pyagxarm"],
                  {"python3-can", "python3-typing-extensions"}),
                 ("components/control/manipulation",
-                 ["components/thirdparty/pyagxarm", "components/control/manipulation"],
-                 {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy"})):
+                 ["components/thirdparty/pyagxarm", "components/peripherals/motor",
+                  "components/control/manipulation"],
+                 {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy",
+                  "libboost-dev", "libgpiod-dev", "rustc-1.91", "cargo-1.91"})):
             with self.subTest(package=package), tempfile.TemporaryDirectory() as temporary:
                 environment = dict(os.environ)
                 for key in ("BUILD_CONFIG_FILE", "BUILD_TARGET", "BUILD_TARGET_FILE",

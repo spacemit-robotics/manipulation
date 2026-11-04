@@ -1,0 +1,32 @@
+# SO101 arm and calibrated one-channel gripper on one shared serial connection.
+schema_version: 3
+device:
+    driver: so101
+    model: so101
+    arm:
+        device_id: arm_main
+        resource_id: so101_${resource:-main}
+        tolerance_rad: 0.01
+        timeout_s: 10
+        maximum_age_s: 0.2
+        joints:
+            - {name: shoulder_pan, minimum_rad: -1.91986, maximum_rad: 1.91986}
+            - {name: shoulder_lift, minimum_rad: -1.74533, maximum_rad: 1.74533}
+            - {name: elbow_flex, minimum_rad: -1.69, maximum_rad: 1.69}
+            - {name: wrist_flex, minimum_rad: -1.65806, maximum_rad: 1.65806}
+            - {name: wrist_roll, minimum_rad: -2.74385, maximum_rad: 2.84121}
+    effector:
+        device_id: gripper_main
+        channels: [gripper]
+        feedback: position
+        tolerance: 0.02
+        timeout_s: 5
+        maximum_age_s: 0.2
+    options:
+        port: "${port}"
+        arm_ids: "1,2,3,4,5"
+        gripper_id: 6
+        arm_calibration: "${arm_calibration:-}"
+        gripper_calibration: "${gripper_calibration}"
+        max_velocity_rad_s: 1.0
+steps: []

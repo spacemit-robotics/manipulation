@@ -11,9 +11,24 @@ endforeach()
 include(CTest)
 find_package(Threads REQUIRED)
 find_package(yaml-cpp REQUIRED)
-add_compile_options(-Wall -Wextra -Werror)
-
 option(MANIPULATION_ENABLE_NERO "Build the Nero/Revo2 driver (vendor SDK is used at run time only)" ON)
+option(MANIPULATION_ENABLE_SO101 "Build the SO101 arm and gripper driver" ON)
+set(MANIPULATION_MOTOR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../peripherals/motor" CACHE PATH
+    "Motor source tree for the SO101 driver; otherwise use an installed motor package")
+if(MANIPULATION_ENABLE_SO101)
+    if(EXISTS "${MANIPULATION_MOTOR_SOURCE_DIR}/CMakeLists.txt")
+        # Only its Feetech driver, as the former manipulator component builds it; not installed from here.
+        set(SROBOTIS_PERIPHERALS_MOTOR_ENABLED_DRIVERS "drv_uart_feetech" CACHE STRING
+            "Enabled motor drivers (semicolon-separated). Empty means auto-detect." FORCE)
+        set(BUILD_TESTS OFF CACHE BOOL "Build test programs" FORCE)
+        add_subdirectory("${MANIPULATION_MOTOR_SOURCE_DIR}" motor EXCLUDE_FROM_ALL)
+        set(MANIPULATION_MOTOR_TARGET motor)
+    else()
+        find_package(motor CONFIG REQUIRED)
+        set(MANIPULATION_MOTOR_TARGET components::motor)
+    endif()
+endif()
+add_compile_options(-Wall -Wextra -Werror)  # After the motor component: these apply to this component's code.
 find_package(OpenCV QUIET COMPONENTS core calib3d)
 option(MANIPULATION_ENABLE_CALIBRATION "Build the offline OpenCV hand-eye solver (default: when OpenCV is found)"
     ${OpenCV_FOUND})
@@ -46,6 +61,9 @@ add_subdirectory(drivers/mock)
 if(MANIPULATION_ENABLE_NERO)
     add_subdirectory(drivers/arms/nero)
 endif()
+if(MANIPULATION_ENABLE_SO101)
+    add_subdirectory(drivers/arms/so101)
+endif()
 foreach(module IN LISTS MANIPULATION_EXTRA_DRIVER_DIRS)
     string(MD5 module_key "${module}")
     add_subdirectory("${module}" "extra_drivers/${module_key}")
@@ -71,6 +89,8 @@ add_executable(manipulation-device capabilities/motion/cli/device_cli.cpp
     capabilities/motion/cli/device_service.cpp capabilities/diagnostics/arm_check.cpp)
 target_include_directories(manipulation-device PRIVATE capabilities/diagnostics)
 target_link_libraries(manipulation-device PRIVATE manipulation_motion manipulation_drivers yaml-cpp Threads::Threads)
+file(RELATIVE_PATH MANIPULATION_LIB_FROM_BIN "/${CMAKE_INSTALL_BINDIR}" "/${CMAKE_INSTALL_LIBDIR}")
+set_target_properties(manipulation-device PROPERTIES INSTALL_RPATH "$ORIGIN/${MANIPULATION_LIB_FROM_BIN}")
 
 if(MANIPULATION_ENABLE_CALIBRATION)
     find_package(OpenCV REQUIRED COMPONENTS core calib3d)
@@ -96,7 +116,8 @@ install(TARGETS manipulation_contracts manipulation_drivers manipulation_motion 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(DIRECTORY bindings/python/spacemit_manipulation
     DESTINATION ${MANIPULATION_PYTHON_DIR} PATTERN "__pycache__" EXCLUDE)
-install(FILES capabilities/kinematics/python/urdf_fk.py capabilities/calibration/cli/workbench.py
+install(FILES capabilities/kinematics/python/urdf_fk.py capabilities/kinematics/python/urdf_ik.py
+    capabilities/calibration/cli/workbench.py
     capabilities/calibration/cli/collect.py capabilities/calibration/cli/hand_eye_cli.py
     capabilities/calibration/python/sampling.py capabilities/calibration/python/charuco.py
     capabilities/calibration/python/charuco_sampler.py capabilities/diagnostics/cli/operator_cli.py
@@ -127,6 +148,7 @@ if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(test_environment "PYTHONDONTWRITEBYTECODE=1;MANIPULATION_DEVICE=$<TARGET_FILE:manipulation-device>"
         "MANIPULATION_TEST_NERO=$<BOOL:${MANIPULATION_ENABLE_NERO}>"
+        "MANIPULATION_TEST_SO101=$<BOOL:${MANIPULATION_ENABLE_SO101}>"
         "MANIPULATION_LOCK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/test-locks")
     add_executable(manipulation_arm_test tests/arm_test.cpp)
     target_include_directories(manipulation_arm_test PRIVATE core)
@@ -139,8 +161,25 @@ if(BUILD_TESTING)
         ENVIRONMENT "${test_environment}")
     add_test(NAME manipulation_device_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_device.py)
     add_test(NAME manipulation_tools_contract COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tools.py)
-    set_tests_properties(manipulation_device_contract manipulation_tools_contract PROPERTIES
+    add_test(NAME manipulation_kinematics_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_kinematics.py)
+    set_tests_properties(manipulation_device_contract manipulation_tools_contract manipulation_kinematics_contract PROPERTIES
         TIMEOUT 90 ENVIRONMENT "${test_environment}")
+    add_executable(manipulation_control_api_test tests/control_api_test.cpp)
+    target_link_libraries(manipulation_control_api_test PRIVATE manipulation_motion manipulation_drivers)
+    add_test(NAME manipulation_control_api_contract COMMAND manipulation_control_api_test)
+    add_test(NAME manipulation_control_cli_contract
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_control_api.py)
+    set_tests_properties(manipulation_control_api_contract manipulation_control_cli_contract PROPERTIES
+        TIMEOUT 90 ENVIRONMENT "${test_environment}")
+    if(MANIPULATION_ENABLE_SO101)
+        add_test(NAME manipulation_so101_contract
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_so101.py)
+        add_test(NAME manipulation_so101_calibration_contract
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_so101_calibration.py)
+        set_tests_properties(manipulation_so101_contract manipulation_so101_calibration_contract PROPERTIES
+            TIMEOUT 90 ENVIRONMENT "${test_environment};MANIPULATION_FEETECH_BUS=$<TARGET_FILE:manipulation_feetech_bus>")
+    endif()
     if(MANIPULATION_ENABLE_NERO)
         add_executable(manipulation_recovery_test tests/recovery_test.cpp)
         target_link_libraries(manipulation_recovery_test PRIVATE manipulation_motion manipulation_drivers)
