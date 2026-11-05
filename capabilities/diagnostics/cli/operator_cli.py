@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Device operator commands. Model-independent; no implicit enable, home or recovery."""
 
+import math
+
 from .operator_support import Context, argument_parser, load_tool, run
 
 
@@ -110,8 +112,7 @@ def hand_grasp(context, args):
 
 def monitor(context, args):
     """Print fresh state until Ctrl+C (or --count samples). Read only: with torque released the arm
-    and hand can be moved by hand meanwhile, as in the former test tool's monitor."""
-    import math
+    and hand can be moved by hand meanwhile."""
     import time
     from .client import DeviceClient
 
@@ -183,6 +184,17 @@ def check_duration(state, target, speed, timeout_s):
         )
 
 
+def path_timeout(start, waypoints, velocity, acceleration, arm_timeout_s):
+    """Client deadline of a joint path: its profile duration, as the device computes it, plus the
+    arm timeout and a margin; at most the client limit of 180 s."""
+    distance, previous = 0.0, start
+    for waypoint in waypoints:
+        distance += max(abs(a - b) for a, b in zip(waypoint, previous))
+        previous = waypoint
+    duration = max(0.3, 1.875 * distance / velocity, math.sqrt(5.774 * distance / acceleration))
+    return min(180.0, duration + arm_timeout_s + 5.0)
+
+
 def kinematics(context, args):
     """Tip poses in the base frame: position in metres, URDF roll-pitch-yaw in radians."""
     import json
@@ -236,15 +248,23 @@ def kinematics(context, args):
             )
             print(f"{len(waypoints)} waypoints", flush=True)
             if client.capabilities()["arm"]["joint_path"]:
-                for start in range(
-                    0, len(waypoints), 128
-                ):  # The device accepts 128 waypoints per path.
+                previous = current
+                for start in range(0, len(waypoints), 128):  # At most 128 waypoints per path.
+                    chunk = waypoints[start : start + 128]
                     result = client.move_arm_path(
-                        waypoints[start : start + 128],
+                        chunk,
                         args.speed,
                         args.path_velocity,
                         args.path_acceleration,
+                        timeout=path_timeout(
+                            previous,
+                            chunk,
+                            args.path_velocity,
+                            args.path_acceleration,
+                            described["arm_timeout_s"],
+                        ),
                     )
+                    previous = chunk[-1]
                 print(result)
             else:  # Point moves only: hand over within tolerance, stop at the last waypoint.
                 for waypoint in waypoints[:-1]:

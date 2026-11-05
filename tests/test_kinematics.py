@@ -26,6 +26,13 @@ def module(name, path):
 
 fk = module("spacemit_manipulation.urdf_fk", "capabilities/kinematics/python/urdf_fk.py")
 ik = module("spacemit_manipulation.urdf_ik", "capabilities/kinematics/python/urdf_ik.py")
+module(
+    "spacemit_manipulation.operator_support",
+    "bindings/python/spacemit_manipulation/operator_support.py",
+)
+operator_cli = module(
+    "spacemit_manipulation.operator_cli", "capabilities/diagnostics/cli/operator_cli.py"
+)
 
 
 def load(name):
@@ -38,6 +45,15 @@ def load(name):
 
 def sample(model, generator, margin=0.2):
     return [generator.uniform(low + margin, high - margin) for low, high in model.limits]
+
+
+class LineMoveDeadlineTests(unittest.TestCase):
+    def test_deadline_covers_the_path_profile_and_the_arm_timeout(self):
+        # 1.2 rad of largest-joint change at 0.2 rad/s: 1.875 * 1.2 / 0.2 = 11.25 s of profile.
+        waypoints = [[0.01 * i, 0.0] for i in range(1, 121)]
+        timeout = operator_cli.path_timeout([0.0, 0.0], waypoints, 0.2, 0.5, 10)
+        self.assertAlmostEqual(timeout, 11.25 + 10 + 5)
+        self.assertEqual(operator_cli.path_timeout([0.0], [[100.0]], 0.2, 0.5, 10), 180)
 
 
 class KinematicsTests(unittest.TestCase):
