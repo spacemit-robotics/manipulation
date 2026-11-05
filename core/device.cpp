@@ -211,6 +211,8 @@ void DeviceSession::EnableArm() {
     try {
         impl_->arm->Enable();
     } catch (const CommandRejected&) {
+        // A rejection after the driver call has latched the arm session: latch the assembly too.
+        impl_->latched = impl_->latched || Failed(impl_->arm->GetResult().status);
         throw;
     } catch (...) {
         impl_->latched = true;
@@ -223,6 +225,8 @@ void DeviceSession::DisableArm() {
     try {
         impl_->arm->Disable();
     } catch (const CommandRejected&) {
+        // A rejection after the driver call has latched the arm session: latch the assembly too.
+        impl_->latched = impl_->latched || Failed(impl_->arm->GetResult().status);
         throw;
     } catch (...) {
         impl_->latched = true;
@@ -251,15 +255,19 @@ void DeviceSession::SetEffectorEnabled(bool enabled) {
     if (arm.fault || arm.moving || arm.command_active || tool.fault || tool.moving) {
         throw CommandRejected("cannot change torque while arm or effector is faulted or moving");
     }
+    bool written = false;  // A rejection after the driver call is not "nothing written".
     try {
         if (enabled)
             impl_->effector->Enable();
         else
             impl_->effector->Disable();
+        written = true;
         const auto state = ReadEffector();
         Check(state.enabled.has_value() && *state.enabled == enabled,
               "effector torque state not confirmed");
     } catch (const CommandRejected&) {
+        if (!written) throw;
+        impl_->latched = true;
         throw;
     } catch (...) {
         impl_->latched = true;
@@ -297,15 +305,19 @@ CommandResult DeviceSession::HoldEffector() {
         p.definition.effector.feedback == EffectorFeedback::kNone) {
         throw CommandRejected("verified effector hold unsupported");
     }
-    const auto state = ReadEffector();
-    if (state.enabled.has_value() && !*state.enabled)
-        throw CommandRejected("cannot hold a disabled effector");
+    // Without fresh feedback the hold is still attempted, but it cannot be confirmed.
+    try {
+        const auto state = ReadEffector();
+        if (state.enabled.has_value() && !*state.enabled)
+            throw CommandRejected("cannot hold a disabled effector");
+    } catch (const CommandRejected&) {
+        throw;
+    } catch (const std::exception&) {
+    }
     bool confirmed = false;
     try {
         confirmed = p.effector->Hold();
-    } catch (const CommandRejected&) {
-        throw;
-    } catch (...) {
+    } catch (...) {  // Refused or failed: no physical stop is established.
     }
     p.latched = p.latched || !confirmed;
     return {++p.command_id, confirmed ? Result::kSucceeded : Result::kStopUnknown,
@@ -514,8 +526,8 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
     Check(!before.fault && !before.moving, "effector faulted or busy");
     Check(!before.enabled.has_value() || *before.enabled, "effector disabled");
     const bool open_loop = p.definition.effector.feedback == EffectorFeedback::kNone;
-    Check(!open_loop || point.duration_s <= p.definition.effector.timeout_s,
-          "effector duration exceeds timeout_s");
+    if (point.duration_s > p.definition.effector.timeout_s)
+        throw CommandRejected("effector duration_s exceeds the effector timeout_s");
     const auto submitted = Clock::now();
     // Open loop: wait the commanded execution time, then report the move as delivered, not reached.
     const auto finished = submitted + std::chrono::duration_cast<Clock::duration>(

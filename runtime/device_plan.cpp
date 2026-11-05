@@ -126,6 +126,7 @@ DevicePlan LoadDevicePlan(const std::string& filename, const DeviceRegistry& reg
             if (plan.definition.effector.channels.empty() ||
                 result.effector.positions.size() != plan.definition.effector.channels.size() ||
                 !std::isfinite(result.effector.duration_s) || result.effector.duration_s <= 0 ||
+                result.effector.duration_s > plan.definition.effector.timeout_s ||
                 result.effector.duration_s >
                         registry.Get(plan.driver).maximum_effector_duration_s) {
                 throw std::runtime_error("invalid effector target or unsupported duration");

@@ -175,6 +175,17 @@ class DeviceTests(unittest.TestCase):
         self.save()
         self.assertNotEqual(self.cli("validate", str(self.filename)).returncode, 0)
 
+    def test_step_longer_than_the_effector_timeout_is_invalid(self):
+        self.plan["steps"] = [
+            dict(capability="effector_position", positions=[0.5] * 6, duration_s=6)
+        ]
+        self.save()
+        result = self.cli("validate", str(self.filename))
+        self.assertNotEqual(result.returncode, 0)
+        self.plan["steps"][0]["duration_s"] = 0.5
+        self.save()
+        self.assertEqual(self.cli("validate", str(self.filename)).returncode, 0)
+
     def test_signal_exits_service_without_hanging(self):
         client = self.client()
         client.process.send_signal(signal.SIGINT)
@@ -257,8 +268,7 @@ class DeviceTests(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get("MANIPULATION_TEST_NERO") == "1", "Nero disabled")
     def test_gesture_sends_hand_targets_while_the_arm_streams(self):
-        # The original feedback gestures: hand targets on schedule while the arm moves (open-loop
-        # hand).
+        # Result gestures: hand targets on schedule while the arm moves (open-loop hand).
         sdk = self.nero("hnofb")
         self.plan["device"]["effector"]["feedback"] = "none"
         self.save()
@@ -372,7 +382,7 @@ class DeviceTests(unittest.TestCase):
                 else:
                     with self.client(True) as client:
                         with self.assertRaises(DeviceCommandError) as raised:
-                            client.move_effector([0.5] * 6)
+                            client.move_effector([0.5] * 6, duration_s=0.05)  # Within timeout_s.
                         if mode == "hnoend":
                             self.assertIn("stop_unknown", str(raised.exception))
                         with self.assertRaises(DeviceCommandError):

@@ -51,6 +51,7 @@ public:
     void Disconnect() noexcept override {}
 
     m::ArmState Read() override {
+        if (reject_reads) throw m::CommandRejected("snapshot refused");
         m::ArmState state;
         state.joints_rad = {position};
         state.received_at = m::Clock::now();
@@ -67,6 +68,7 @@ public:
         if (reject) throw m::CommandRejected("enable refused");
         ++writes;
         enabled = true;
+        reject_reads = reject_after_write;
     }
 
     void Disable() override {
@@ -89,6 +91,7 @@ public:
     m::ArmCapabilities capabilities{true, false, false};
     int connections = 0, writes = 0, holds = 0;
     bool enabled = true, fault = false, moving = false, reject = false, confirm_hold = true;
+    bool reject_after_write = false, reject_reads = false;
     double position = 0;
 
 private:
@@ -191,10 +194,17 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     Refused([&] { session.DisableArm(); });
     Refused([&] { session.EnableEffector(); });
     Refused([&] { session.DisableEffector(); });
-    Refused([&] { session.HoldArm(); });
-    Refused([&] { session.HoldEffector(); });
     Check(!session.Latched() && arm_raw->writes == writes && tool_raw->writes == 0,
           "driver refusal mutated command state");
+    // A refused hold establishes no stop: it reports stop_unknown and latches until reconnect.
+    Check(session.HoldArm().status == m::Result::kStopUnknown && session.Latched(),
+          "refused arm hold did not latch");
+    session.Disconnect();
+    session.Connect();
+    Check(session.HoldEffector().status == m::Result::kStopUnknown && session.Latched(),
+          "refused tool hold did not latch");
+    session.Disconnect();
+    session.Connect();
     arm_raw->reject = tool_raw->reject = false;
     session.DisableEffector();
     session.DisableArm();
@@ -202,7 +212,14 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     Refused([&] { session.HoldEffector(); });
     Check(!session.ReadArm().enabled && !*session.ReadEffector().enabled,
           "hold re-enabled a disabled device");
-    session.EnableArm();
+    // A refusal after the driver wrote (here the confirmation read) is not "nothing written".
+    arm_raw->reject_after_write = true;
+    Invalid([&] { session.EnableArm(); });
+    Check(session.Latched(), "unconfirmed enable did not latch");
+    arm_raw->reject_after_write = arm_raw->reject_reads = false;
+    session.Disconnect();
+    session.Connect();
+    Check(session.ReadArm().enabled, "enable was not written");
     session.EnableEffector();
     Check(session.HoldArm().status == m::Result::kSucceeded &&
                   session.HoldEffector().status == m::Result::kSucceeded,
@@ -246,6 +263,10 @@ void TestMockTorque(const std::string& directory) {
     Check(session.JogArm(0, -0.1).status == m::Result::kSucceeded, "re-enabled mock cannot move");
     Check(session.MoveEffector({{0.5}, 0.1}).status == m::Result::kSucceeded,
           "re-enabled mock tool cannot move");
+    // A measured move longer than the effector timeout_s could only time out: refused unwritten.
+    Refused([&] { session.MoveEffector({{1}, definition.effector.timeout_s + 1}); });
+    Check(!session.Latched() && session.ReadEffector().positions == std::vector<double>{0.5},
+          "over-long effector move was written or latched");
 }
 }  // namespace
 

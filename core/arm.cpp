@@ -220,10 +220,15 @@ void ArmSession::Enable() {
     if (state.fault || state.moving || state.command_active) {
         throw CommandRejected("cannot enable faulted or moving arm");
     }
+    bool written = false;  // A rejection after the driver call is not "nothing written".
     try {
         impl_->arm->Enable();
+        written = true;
         Check(Read().enabled, "enable not confirmed");
     } catch (const CommandRejected&) {
+        if (!written) throw;
+        impl_->result.status = Result::kFault;
+        impl_->result.detail = "enable unconfirmed; inspect before reconnecting";
         throw;
     } catch (...) {
         impl_->result.status = Result::kFault;
@@ -239,10 +244,15 @@ void ArmSession::Disable() {
     if (state.fault || state.moving || state.command_active) {
         throw CommandRejected("cannot disable faulted or moving arm");
     }
+    bool written = false;  // A rejection after the driver call is not "nothing written".
     try {
         impl_->arm->Disable();
+        written = true;
         Check(!Read().enabled, "disable not confirmed");
     } catch (const CommandRejected&) {
+        if (!written) throw;
+        impl_->result.status = Result::kFault;
+        impl_->result.detail = "disable unconfirmed; inspect before reconnecting";
         throw;
     } catch (...) {
         impl_->result.status = Result::kFault;
@@ -255,22 +265,31 @@ CommandResult ArmSession::Hold() {
     auto& p = *impl_;
     Check(p.connected, "not connected");
     if (!GetCapabilities().verified_hold) throw CommandRejected("verified arm hold unsupported");
-    const auto state = Read();
-    if (state.fault) {
-        p.result.status = Result::kFault;
-        p.result.detail = "arm fault observed before hold";
+    // Without fresh feedback the hold is still attempted, but it cannot be confirmed.
+    std::string failure;
+    try {
+        const auto state = Read();
+        if (state.fault) {
+            p.result.status = Result::kFault;
+            p.result.detail = "arm fault observed before hold";
+        }
+        if (!state.enabled) throw CommandRejected("cannot hold a disabled arm");
+    } catch (const CommandRejected&) {
+        throw;
+    } catch (const std::exception& error) {
+        failure = std::string("arm feedback unavailable before hold: ") + error.what();
     }
-    if (!state.enabled) throw CommandRejected("cannot hold a disabled arm");
     bool confirmed = false;
     try {
         confirmed = p.arm->Hold();
-    } catch (const CommandRejected&) {
-        throw;
+    } catch (const std::exception& error) {  // Refused or failed: no physical stop is established.
+        if (failure.empty()) failure = std::string("arm hold failed: ") + error.what();
     } catch (...) {
-    }  // A failed hold cannot establish a physical stop.
+    }
+    if (!confirmed && failure.empty()) failure = "arm hold unconfirmed";
     CommandResult result{
             p.result.command_id + 1, confirmed ? Result::kSucceeded : Result::kStopUnknown,
-            confirmed ? "arm_hold_confirmed" : "arm hold unconfirmed; inspect before reconnecting"};
+            confirmed ? "arm_hold_confirmed" : failure + "; inspect before reconnecting"};
     const bool latched = p.result.status == Result::kFault ||
                          p.result.status == Result::kTimedOut ||
                          p.result.status == Result::kStopUnknown;
@@ -306,6 +325,7 @@ CommandResult ArmSession::Begin(const JointPoint& final_point, double tolerance_
     // Motion is allowed only when it is the arm settling after our own command that did not wait.
     Check(!state.fault && state.enabled && state.position_mode && (!state.moving || p.settling),
           "arm must be normal, enabled, stationary and in position mode");
+    const double extra_s = extra_time_s(state);  // May refuse the request: before any change.
     p.point = final_point;
     p.tolerance = tolerance_rad;
     p.completion = completion;
@@ -313,9 +333,9 @@ CommandResult ArmSession::Begin(const JointPoint& final_point, double tolerance_
     p.last_sample = state.sample_id;
     p.settled_samples = 0;
     p.submitted_at = Clock::now();
-    p.deadline = p.submitted_at +
-                 std::chrono::duration_cast<Clock::duration>(
-                         std::chrono::duration<double>(p.config.timeout_s + extra_time_s(state)));
+    p.deadline =
+            p.submitted_at + std::chrono::duration_cast<Clock::duration>(
+                                     std::chrono::duration<double>(p.config.timeout_s + extra_s));
     const auto previous = p.result;
     p.result = {p.result.command_id + 1, Result::kRunning,
                 "accepted; awaiting fresh target evidence"};
@@ -402,7 +422,7 @@ CommandResult ArmSession::SubmitTrajectory(const JointTrajectory& trajectory) {
         // A linear segment sent at command_rate_hz never steps further than max_step_rad per tick.
         const double ticks = std::max(1.0, (times[i] - times[i - 1]) / tick);
         for (std::size_t j = 0; j < knots[i].size(); ++j) {
-            Check(std::abs(knots[i][j] - knots[i - 1][j]) <= trajectory.max_step_rad * ticks + 1e-9,
+            Check(std::abs(knots[i][j] - knots[i - 1][j]) <= trajectory.max_step_rad * ticks + 1e-6,
                   "trajectory step exceeds max_step_rad");
         }
     }

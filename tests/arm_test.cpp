@@ -177,6 +177,15 @@ int main() {
         raw->read_failure = false;
         Reject([&] { session.Submit({{0}, 0.05}); }, "read failure did not latch");
 
+        // A hold without fresh feedback is attempted, but cannot be confirmed: it latches.
+        Reconnect(session);
+        raw->read_failure = raw->stop_failure = true;
+        const auto attempts = raw->holds;
+        Check(session.Hold().status == m::Result::kStopUnknown && raw->holds == attempts + 1,
+              "hold without feedback reported as confirmed or not attempted");
+        raw->read_failure = raw->stop_failure = false;
+        Reject([&] { session.Submit({{0}, 0.05}); }, "hold without feedback did not latch");
+
         // Explicit enable only; controller fault during motion latches.
         Reconnect(session);
         raw->enabled = false;
