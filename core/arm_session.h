@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Internal arm execution used by DeviceSession. Not installed.
-#ifndef ARM_SESSION_H
-#define ARM_SESSION_H
+#ifndef MANIPULATION_CORE_ARM_SESSION_H_
+#define MANIPULATION_CORE_ARM_SESSION_H_
 
 #include <memory>
 #include <string>
@@ -27,10 +27,16 @@ public:
     void Disconnect() noexcept;
     ArmState Read();
     ArmState Diagnose();
+    ArmCapabilities GetCapabilities() const;
     void Enable();
+    void Disable();
+    CommandResult Hold();
     CommandResult Submit(const JointPoint& point);
+    // Sends the target and completes at once; the next target may start while the arm moves.
+    CommandResult Follow(const JointPoint& point);
     CommandResult SubmitPath(const JointPath& path);  // Completion is judged at the last waypoint.
-    CommandResult SubmitTrajectory(const JointTrajectory& trajectory);  // Likewise, at the last knot.
+    // Likewise, at the last knot.
+    CommandResult SubmitTrajectory(const JointTrajectory& trajectory);
     CommandResult Poll();
     CommandResult Cancel();
     CommandResult GetResult() const;
@@ -38,7 +44,6 @@ public:
     bool Settling() const;
     // The final target of the last command (the one the arm settles toward while Settling()).
     const std::vector<double>& LastTarget() const;
-    const std::string& SessionId() const;
 
 private:
     void Ready();
@@ -48,11 +53,11 @@ private:
     enum class Completion { kArrival, kDelivered, kWithinTolerance };
     template <typename Extra, typename Write>
     CommandResult Begin(const JointPoint& final_point, double tolerance_rad, Completion completion,
-        Extra extra_time_s, Write write);
+                        Extra extra_time_s, Write write);
     void Stop(Result result, const std::string& detail);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace spacemit::manipulation
-#endif  // ARM_SESSION_H
+#endif  // MANIPULATION_CORE_ARM_SESSION_H_

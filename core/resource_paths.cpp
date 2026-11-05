@@ -7,7 +7,8 @@
 
 namespace spacemit::manipulation {
 DriverOptions ResolveResourceOptions(const DriverOptions& options, const std::string& directory,
-    const std::vector<std::string>& resources, const std::vector<std::string>& executables) {
+                                     const std::vector<std::string>& resources,
+                                     const std::vector<std::string>& executables) {
     auto result = options;
     const auto base = std::filesystem::absolute(directory);
     for (const auto& key : resources) {

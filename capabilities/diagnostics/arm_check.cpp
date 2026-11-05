@@ -13,7 +13,7 @@ constexpr double kSpeed = 0.01;
 }  // namespace
 
 int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool timeout_only,
-    const std::function<bool()>& interrupted, std::ostream& out) {
+                const std::function<bool()>& interrupted, std::ostream& out) {
     auto definition = plan.definition;
     definition.arm.tolerance_rad = 0.002;
     DeviceSession session(definition, registry.Create(plan.driver, definition, plan.options));
@@ -21,7 +21,8 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
     session.Diagnose();
     const auto before = session.ReadArm();
     if (!before.enabled || !before.position_mode || before.moving || before.fault) {
-        throw std::runtime_error("check requires an enabled, stationary, normal arm in position mode");
+        throw std::runtime_error(
+                "check requires an enabled, stationary, normal arm in position mode");
     }
     for (std::size_t i = 0; i < before.joints_rad.size(); ++i) {
         if (before.joints_rad[i] < definition.arm.joints[i].minimum_rad ||
@@ -44,10 +45,15 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
             quick.Diagnose();
             if (interrupted()) return 1;
             const auto result = quick.MoveArm(away, interrupted);
-            out << "timeout=" << ResultName(result.status) << ' ' << result.detail << '\n' << std::flush;
+            out << "timeout=" << ResultName(result.status) << ' ' << result.detail << '\n'
+                << std::flush;
             if (result.status != Result::kTimedOut) return 1;
             bool latched = false;
-            try { quick.MoveArm(back); } catch (const std::exception&) { latched = true; }
+            try {
+                quick.MoveArm(back);
+            } catch (const std::exception&) {
+                latched = true;
+            }
             if (!latched) throw std::runtime_error("timeout did not latch");
         }
         session.Connect();
@@ -59,7 +65,8 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
 
     auto cycle = session.MoveArm(away, interrupted);
     if (cycle.status == Result::kSucceeded) cycle = session.MoveArm(back, interrupted);
-    out << "point_roundtrip=" << ResultName(cycle.status) << ' ' << cycle.detail << '\n' << std::flush;
+    out << "point_roundtrip=" << ResultName(cycle.status) << ' ' << cycle.detail << '\n'
+        << std::flush;
     if (cycle.status != Result::kSucceeded || interrupted()) return 1;
 
     unsigned polls = 0;  // First call is the pre-submission check; cancel on the first poll.
@@ -75,7 +82,8 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
     session.Connect();
     const auto after = session.ReadArm();
     out << std::setprecision(12) << "reconnected_actual_rad=[";
-    for (std::size_t i = 0; i < after.joints_rad.size(); ++i) out << (i ? "," : "") << after.joints_rad[i];
+    for (std::size_t i = 0; i < after.joints_rad.size(); ++i)
+        out << (i ? "," : "") << after.joints_rad[i];
     out << "] moving=" << after.moving << " fault=" << after.fault << '\n';
     return after.moving || after.fault ? 1 : 0;
 }

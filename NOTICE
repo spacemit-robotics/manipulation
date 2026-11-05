@@ -1,0 +1,33 @@
+SpacemiT Manipulation Component
+Copyright 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+
+This product includes software developed at
+SpacemiT (Hangzhou) Technology Co. Ltd. (https://www.spacemit.com/).
+
+---------------------------------------------------------------------------
+Third-party Software Notices:
+---------------------------------------------------------------------------
+
+This component uses the following third-party software at run time; its source
+code is NOT included in this repository:
+
+1. pyAgxArm (components/thirdparty/pyagxarm)
+   Licensed under the GNU Lesser General Public License v3.0 only.
+   Used by the Nero driver through a separate worker process.
+
+---------------------------------------------------------------------------
+Derived Works:
+---------------------------------------------------------------------------
+
+1. SO-ARM100 URDF (https://github.com/TheRobotStudio/SO-ARM100)
+   Copyright (c) 2023-2026 TheRobotStudio
+   Licensed under the Apache License 2.0.
+   The file descriptions/robots/so101/so101.urdf is derived from the SO-ARM100
+   project's so101_new_calib.urdf, with meshes replaced by simple geometric
+   shapes while retaining the original kinematic parameters.
+
+2. Nero robot description
+   Copyright (c) aalicecc
+   Licensed under the MIT License, see descriptions/robots/nero/LICENSE.
+   The joint limits in descriptions/robots/nero/nero_description.urdf are
+   replaced by the pyAgxArm preset.

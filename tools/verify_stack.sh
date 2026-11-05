@@ -6,6 +6,13 @@ set -euo pipefail
 SDK_ROOT="$(cd "$(dirname "$(realpath -- "${BASH_SOURCE[0]}")")/../../../.." && pwd -P)"
 cd "${SDK_ROOT}"
 STACK_BUILD="$(realpath -m -- "${1:-${SDK_ROOT}/output/manipulation-dev}")"
+# Every run installs into an empty prefix: files left by an earlier run must not change what the
+# installation checks see.
+if [[ "${STACK_BUILD}" == "/" ]]; then
+    echo "verify_stack: the build directory must not be /" >&2
+    exit 2
+fi
+rm -rf -- "${STACK_BUILD}/install"
 # Tests use a private lease directory so they never contend with programs on this host.
 export MANIPULATION_LOCK_DIRECTORY="${STACK_BUILD}/locks"
 export PYTHONDONTWRITEBYTECODE=1
@@ -27,7 +34,8 @@ cmake --install "${STACK_BUILD}/arena"
 cmake -S components/thirdparty/pyagxarm -B "${STACK_BUILD}/vendor" \
     -DCMAKE_INSTALL_PREFIX="${STACK_BUILD}/install"
 cmake --install "${STACK_BUILD}/vendor"
-python3 application/native/dice_arena/tests/check_runtime.py "${STACK_BUILD}/install/share/dice_arena/game"
+python3 application/native/dice_arena/tests/check_runtime.py \
+    "${STACK_BUILD}/install/share/dice_arena/game"
 cmake -S components/control/manipulation/examples/device_consumer -B "${STACK_BUILD}/consumer" \
     -DCMAKE_PREFIX_PATH="${STACK_BUILD}/install"
 cmake --build "${STACK_BUILD}/consumer" -j2
@@ -35,9 +43,9 @@ cmake --build "${STACK_BUILD}/consumer" -j2
 cmake -S components/control/manipulation -B "${STACK_BUILD}/default" -DCMAKE_BUILD_TYPE=Release
 cmake --build "${STACK_BUILD}/default" -j2
 ctest --test-dir "${STACK_BUILD}/default" --output-on-failure
+BENCH_DRIVER="${SDK_ROOT}/components/control/manipulation/examples/bench_driver"
 cmake -S components/control/manipulation -B "${STACK_BUILD}/extension" -DBUILD_TESTING=OFF \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DMANIPULATION_EXTRA_DRIVER_DIRS="${SDK_ROOT}/components/control/manipulation/examples/bench_driver"
+    -DCMAKE_BUILD_TYPE=Release -DMANIPULATION_EXTRA_DRIVER_DIRS="${BENCH_DRIVER}"
 cmake --build "${STACK_BUILD}/extension" -j2
 "${STACK_BUILD}/extension/manipulation-device" run \
     components/control/manipulation/examples/bench_driver/bench.yaml

@@ -1,0 +1,25 @@
+# SO101 five-joint arm. Imported calibration paths are relative to this configuration.
+schema_version: 3
+device:
+    driver: so101
+    model: so101
+    arm:
+        device_id: arm_main
+        resource_id: so101_${resource:-main}
+        tolerance_rad: 0.01
+        timeout_s: 10
+        maximum_age_s: 0.2
+        # The calibrated travel of each arm bounds the first four joints; these limits only keep
+        # them on the encoder circle. wrist_roll turns fully, so the model limits bound it here.
+        joints:
+            - {name: shoulder_pan, minimum_rad: -3.14159, maximum_rad: 3.14159}
+            - {name: shoulder_lift, minimum_rad: -3.14159, maximum_rad: 3.14159}
+            - {name: elbow_flex, minimum_rad: -3.14159, maximum_rad: 3.14159}
+            - {name: wrist_flex, minimum_rad: -3.14159, maximum_rad: 3.14159}
+            - {name: wrist_roll, minimum_rad: -2.74385, maximum_rad: 2.84121}
+    options:
+        port: "${port}"
+        arm_ids: "1,2,3,4,5"
+        arm_calibration: "${arm_calibration:-so101_calibration.json}"
+        max_velocity_rad_s: 1.0
+steps: []

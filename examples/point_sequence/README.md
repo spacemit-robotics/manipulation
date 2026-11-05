@@ -9,12 +9,11 @@
 
 ```bash
 source build/envsetup.sh
+bash components/thirdparty/pyagxarm/tools/setup_sdk.sh
 cd components/control/manipulation
 mm --with-deps
 manipulation-device run examples/point_sequence/point_sequence.yaml
 ```
-
-输出最后一行为 `{"status":"succeeded","physical_grip_verified":false}`。
 
 ## 修改点位
 
@@ -23,5 +22,6 @@ manipulation-device run examples/point_sequence/point_sequence.yaml
 - `joint_point`：`target_rad` 按 `joints` 顺序给出各关节目标（rad），`speed_scale` 为控制器倍率 `(0,1]`。
 - `effector_position`：`positions` 按 `channels` 顺序给出归一化位置 `[0,1]`，`duration_s` 为执行时长。
 
-目标超出关节限位、数量不符或字段未知时，`manipulation-device validate` 会拒绝该配置。
-换成真机时，将 `device` 段替换为 `manipulation configure MODEL` 生成的设备配置，并保留 `steps`。
+目标须满足关节限位，数组长度须与设备的关节或通道数一致。
+接入真机时，使用对应设备模板生成 `device` 段，并按实际关节和末端重新设置 `steps`。
+示例中的关节限位仅用于 Mock，不能用于真机。

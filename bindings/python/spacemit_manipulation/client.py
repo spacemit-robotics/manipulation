@@ -1,4 +1,5 @@
 """One persistent C++ device owner, fixed operations and correlated bounded requests."""
+
 import json
 from pathlib import Path
 import subprocess
@@ -9,8 +10,10 @@ import time
 class DeviceCommandError(RuntimeError):
     """The structured control result, including stop_unknown, is retained for applications."""
 
-    def __init__(self, result):
+    def __init__(self, result, *, rejected=False, latched=False):
         self.result = result
+        self.rejected = rejected  # Refused before anything was written to the device.
+        self.latched = latched  # The device session is latched until it reconnects.
         super().__init__(str(result))
 
 
@@ -21,9 +24,21 @@ class DeviceClient:
     The device process holds the host-wide lease for the plan's resource_id until close().
     """
 
-    def __init__(self, executable, plan, *, allow_motion=True, allow_enable=False):
-        if allow_enable and not allow_motion:
-            raise ValueError("enable permission also requires motion permission")
+    def __init__(
+        self,
+        executable,
+        plan,
+        *,
+        allow_motion=True,
+        allow_enable=False,
+        allow_disable=False,
+        allow_effector_enable=False,
+        allow_effector_disable=False,
+    ):
+        if not allow_motion and any(
+            (allow_enable, allow_disable, allow_effector_enable, allow_effector_disable)
+        ):
+            raise ValueError("torque permissions also require motion permission")
         self._condition = threading.Condition()
         self._write_lock = threading.Lock()
         self._command_lock = threading.Lock()
@@ -40,8 +55,20 @@ class DeviceClient:
             command.append("--read-only")
         if allow_enable:
             command.append("--enable")
-        self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                        text=True, encoding="utf-8", bufsize=1)
+        if allow_disable:
+            command.append("--allow-disable")
+        if allow_effector_enable:
+            command.append("--allow-effector-enable")
+        if allow_effector_disable:
+            command.append("--allow-effector-disable")
+        self.process = subprocess.Popen(
+            command,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+        )
         self._reader = threading.Thread(target=self._read, daemon=True)
         self._reader.start()
         with self._condition:
@@ -72,7 +99,11 @@ class DeviceClient:
                         self._error = str(response.get("error", "protocol rejected"))
                     else:
                         identifier = response.get("id")
-                        if not self._ready or type(identifier) is not int or type(response.get("ok")) is not bool:
+                        if (
+                            not self._ready
+                            or type(identifier) is not int
+                            or type(response.get("ok")) is not bool
+                        ):
                             raise RuntimeError("invalid device response identity")
                         if identifier in self._ignored:
                             self._ignored.remove(identifier)
@@ -121,7 +152,11 @@ class DeviceClient:
                     if response is not None:
                         self._pending.discard(identifier)
                         if not response["ok"]:
-                            raise DeviceCommandError(response["error"])
+                            raise DeviceCommandError(
+                                response["error"],
+                                rejected=response.get("rejected", False),
+                                latched=response.get("latched", False),
+                            )
                         return response["data"]
                     if self._error:
                         raise DeviceCommandError({"status": "stop_unknown", "reason": self._error})
@@ -132,12 +167,20 @@ class DeviceClient:
                 except Exception as error:
                     cancelled, callback_error = True, error
                 if not cancel_sent and (time.monotonic() >= deadline or cancelled):
-                    self._send("cancel", int((time.monotonic() + 4) * 1e9),
-                               ignore_reply=True, target_id=identifier)
+                    self._send(
+                        "cancel",
+                        int((time.monotonic() + 4) * 1e9),
+                        ignore_reply=True,
+                        target_id=identifier,
+                    )
                     cancel_sent = True
                     if callback_error:
-                        self._error = "cancellation callback failed; cancellation requested, stop unknown"
-                        raise DeviceCommandError({"status": "stop_unknown", "reason": self._error}) from callback_error
+                        self._error = (
+                            "cancellation callback failed; cancellation requested, stop unknown"
+                        )
+                        raise DeviceCommandError(
+                            {"status": "stop_unknown", "reason": self._error}
+                        ) from callback_error
                 if time.monotonic() > deadline + 4:
                     self._error = "no bounded cancellation result; physical stop unknown"
                     raise DeviceCommandError({"status": "stop_unknown", "reason": self._error})
@@ -150,21 +193,113 @@ class DeviceClient:
     def diagnose(self, **kwargs):
         return self.call("diagnose", **kwargs)
 
-    def move_arm(self, target_rad, speed_scale, *, tolerance_rad=0.0, wait_for_arrival=True, resend_interval_s=0.0,
-                 **kwargs):
+    def capabilities(self, **kwargs):
+        """Return driver capabilities; unsupported operations are never emulated."""
+        return self.call("capabilities", **kwargs)
+
+    def enable_arm(self, **kwargs):
+        """Explicitly enable the arm; requires allow_enable at construction."""
+        return self._motion("enable", **kwargs)
+
+    def disable_arm(self, **kwargs):
+        """Release arm torque; requires allow_disable and driver support."""
+        return self._motion("disable", **kwargs)
+
+    def enable_effector(self, **kwargs):
+        """Explicitly enable the tool; requires allow_effector_enable."""
+        return self._motion("effector_enable", **kwargs)
+
+    def disable_effector(self, **kwargs):
+        """Release tool torque; requires allow_effector_disable."""
+        return self._motion("effector_disable", **kwargs)
+
+    def hold_arm(self, **kwargs):
+        """Request a feedback-confirmed hold without releasing torque or clearing faults."""
+        return self._motion("arm_hold", **kwargs)
+
+    def hold_effector(self, **kwargs):
+        """Request a feedback-confirmed tool hold; open-loop tools reject this operation."""
+        return self._motion("effector_hold", **kwargs)
+
+    def jog_arm(self, joint_index, delta_rad, speed_scale=0.05, **kwargs):
+        """Step one zero-based joint relative to fresh feedback, applying normal joint limits."""
+        if type(joint_index) is not int or joint_index < 0:
+            raise ValueError("joint_index must be a nonnegative integer")
+        return self._motion(
+            "arm_jog",
+            joint_index=joint_index,
+            delta_rad=delta_rad,
+            speed_scale=speed_scale,
+            **kwargs,
+        )
+
+    def move_arm(
+        self,
+        target_rad,
+        speed_scale,
+        *,
+        tolerance_rad=0.0,
+        wait_for_arrival=True,
+        resend_interval_s=0.0,
+        **kwargs,
+    ):
         """Point move; tolerance_rad (<= 0.8 deg; 0: the device tolerance) is the arrival tolerance.
 
         With wait_for_arrival=False the move completes on two fresh samples within tolerance_rad
         (detail "within_tolerance"), before the arm is still. resend_interval_s (0, or 0.02..0.2)
         re-sends the same target at that interval while beyond tolerance_rad.
         """
-        return self._motion("arm_point", target_rad=list(target_rad), speed_scale=speed_scale,
-                            tolerance_rad=tolerance_rad, wait_for_arrival=bool(wait_for_arrival),
-                            resend_interval_s=float(resend_interval_s), **kwargs)
+        return self._motion(
+            "arm_point",
+            target_rad=list(target_rad),
+            speed_scale=speed_scale,
+            tolerance_rad=tolerance_rad,
+            wait_for_arrival=bool(wait_for_arrival),
+            resend_interval_s=float(resend_interval_s),
+            **kwargs,
+        )
 
-    def move_arm_trajectory(self, times_s, positions_rad, *, command_rate_hz=100.0, max_step_rad=0.0174533,
-                            speed_scale=1.0, tolerance_rad=0.0, wait_for_arrival=True, effector_schedule=(),
-                            allow_unverified=False, **kwargs):
+    def follow_arm(self, target_rad, speed_scale, **kwargs):
+        """Send a joint target and return without waiting for arrival, to track a moving target at a
+        high rate.
+
+        The first target needs a stationary arm; later ones may replace a target the arm is still
+        moving to. Finish with hold_arm() (stop where it is) or move_arm() (arrive at a final
+        target).
+        """
+        return self._motion(
+            "arm_follow", target_rad=list(target_rad), speed_scale=speed_scale, **kwargs
+        )
+
+    def follow_effector(self, positions, duration_s=0.1, *, allow_unverified=False, **kwargs):
+        """As follow_arm for the end effector; state() reports position and grasp evidence
+        meanwhile.
+
+        Without position feedback the result is "unverified", accepted only with
+        allow_unverified=True.
+        """
+        return self._motion(
+            "effector_follow",
+            {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
+            positions=list(positions),
+            duration_s=duration_s,
+            **kwargs,
+        )
+
+    def move_arm_trajectory(
+        self,
+        times_s,
+        positions_rad,
+        *,
+        command_rate_hz=100.0,
+        max_step_rad=0.0174533,
+        speed_scale=1.0,
+        tolerance_rad=0.0,
+        wait_for_arrival=True,
+        effector_schedule=(),
+        allow_unverified=False,
+        **kwargs,
+    ):
         """Stream a timed joint trajectory (knots interpolated linearly at command_rate_hz).
 
         The first knot must be the current position (0.5 deg); no commanded step may exceed
@@ -173,36 +308,71 @@ class DeviceClient:
         detail "delivered") and the next command may start while the arm settles.
 
         effector_schedule: (at_s, positions, duration_s) targets sent while the arm moves, an
-        arm-and-hand gesture; the result is then "unverified", accepted only with allow_unverified=True.
+        arm-and-hand gesture; the result is then "unverified", accepted only with
+        allow_unverified=True.
         """
-        schedule = [dict(at_s=float(at), positions=[float(v) for v in positions], duration_s=float(duration))
-                    for at, positions, duration in effector_schedule]
-        return self._motion("arm_trajectory", {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
-                            times_s=[float(t) for t in times_s],
-                            positions_rad=[[round(float(v), 7) for v in q] for q in positions_rad],
-                            command_rate_hz=command_rate_hz, max_step_rad=max_step_rad, speed_scale=speed_scale,
-                            tolerance_rad=tolerance_rad, wait_for_arrival=bool(wait_for_arrival),
-                            **({"effector_schedule": schedule} if schedule else {}), **kwargs)
+        schedule = [
+            dict(
+                at_s=float(at), positions=[float(v) for v in positions], duration_s=float(duration)
+            )
+            for at, positions, duration in effector_schedule
+        ]
+        return self._motion(
+            "arm_trajectory",
+            {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
+            times_s=[float(t) for t in times_s],
+            positions_rad=[[round(float(v), 7) for v in q] for q in positions_rad],
+            command_rate_hz=command_rate_hz,
+            max_step_rad=max_step_rad,
+            speed_scale=speed_scale,
+            tolerance_rad=tolerance_rad,
+            wait_for_arrival=bool(wait_for_arrival),
+            **({"effector_schedule": schedule} if schedule else {}),
+            **kwargs,
+        )
 
-    def move_arm_path(self, path_rad, speed_scale, max_velocity_rad_s, max_acceleration_rad_s2, *,
-                      tolerance_rad=0.0, **kwargs):
+    def move_arm_path(
+        self,
+        path_rad,
+        speed_scale,
+        max_velocity_rad_s,
+        max_acceleration_rad_s2,
+        *,
+        tolerance_rad=0.0,
+        **kwargs,
+    ):
         """Continuous motion through the waypoints, stopping only at the last one.
 
         The smooth joint-space profile is bounded by max_velocity_rad_s (<= 0.35) and
-        max_acceleration_rad_s2 (<= 1.0) on the largest joint change; speed_scale is the controller ratio.
-        tolerance_rad (<= 0.8 deg; 0: the device tolerance) is the arrival tolerance at the last waypoint.
+        max_acceleration_rad_s2 (<= 1.0) on the largest joint change; speed_scale is the controller
+        ratio. tolerance_rad (<= 0.8 deg; 0: the device tolerance) is the arrival tolerance at the
+        last waypoint.
         """
-        return self._motion("arm_path", path_rad=[list(map(float, q)) for q in path_rad], speed_scale=speed_scale,
-                            max_velocity_rad_s=max_velocity_rad_s, max_acceleration_rad_s2=max_acceleration_rad_s2,
-                            tolerance_rad=tolerance_rad, **kwargs)
+        return self._motion(
+            "arm_path",
+            path_rad=[list(map(float, q)) for q in path_rad],
+            speed_scale=speed_scale,
+            max_velocity_rad_s=max_velocity_rad_s,
+            max_acceleration_rad_s2=max_acceleration_rad_s2,
+            tolerance_rad=tolerance_rad,
+            **kwargs,
+        )
 
     def move_effector(self, positions, duration_s=0.5, *, allow_unverified=False, **kwargs):
-        """An effector without feedback returns status "unverified" (delivered, not measured).
+        """Per-channel positions: 0 closed, 1 open, on every end effector.
 
-        Such a result is accepted only with allow_unverified=True; it never means the target was reached.
+        An effector without feedback returns status "unverified" (delivered, not measured).
+
+        Such a result is accepted only with allow_unverified=True; it never means the target was
+        reached.
         """
-        return self._motion("effector_position", {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
-                            positions=list(positions), duration_s=duration_s, **kwargs)
+        return self._motion(
+            "effector_position",
+            {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
+            positions=list(positions),
+            duration_s=duration_s,
+            **kwargs,
+        )
 
     def _motion(self, operation, accepted=frozenset({"succeeded"}), **kwargs):
         result = self.call(operation, **kwargs)
@@ -223,7 +393,9 @@ class DeviceClient:
             try:
                 self.process.wait(timeout=5)
             except subprocess.TimeoutExpired as error:
-                raise RuntimeError("runtime did not exit; physical stop unknown, do not restart") from error
+                raise RuntimeError(
+                    "runtime did not exit; physical stop unknown, do not restart"
+                ) from error
         self._reader.join(timeout=1)
         for stream in (self.process.stdin, self.process.stdout):
             if stream is not None and not stream.closed:

@@ -9,6 +9,7 @@ Options (--option NAME=VALUE):
   measured_height_mm=H
   window=FILE|x0,y0,x1,y1  board_window.json or a rectangle the whole board must stay inside
 """
+
 import json
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from .sampling import capture_sample
 
 def write_image_new(path, image):
     import cv2
+
     ok, encoded = cv2.imencode(".png", image)
     if not ok:
         raise RuntimeError("PNG encoding failed")
@@ -42,17 +44,24 @@ class CharucoSampler:
     def __init__(self, options, camera=None):
         known = {"board", "serial", "measured_width_mm", "measured_height_mm", "window"}
         if set(options) - known or "board" not in options:
-            raise ValueError("sampler options: board=FILE (required), serial, measured_width_mm, "
-                             "measured_height_mm, window")
+            raise ValueError(
+                "sampler options: board=FILE (required), serial, measured_width_mm, "
+                "measured_height_mm, window"
+            )
         self.board_path = Path(options["board"]).resolve()
         self.board = json.loads(self.board_path.read_text(encoding="utf-8"))
         measured = None
         if "measured_width_mm" in options or "measured_height_mm" in options:
-            measured = (float(options["measured_width_mm"]) / 1000, float(options["measured_height_mm"]) / 1000)
+            measured = (
+                float(options["measured_width_mm"]) / 1000,
+                float(options["measured_height_mm"]) / 1000,
+            )
         self.detector = CharucoDetector(self.board, measured)
         self.window = parse_window(options.get("window"))
         self.window_source = options.get("window")
-        self.camera = camera or RealSenseCamera(options.get("serial"), self.board.get("image_profile"))
+        self.camera = camera or RealSenseCamera(
+            options.get("serial"), self.board.get("image_profile")
+        )
 
     def capture(self, port, prefix):
         record, image, annotated = capture_sample(port, self.camera, self.detector, self.window)
@@ -61,8 +70,13 @@ class CharucoSampler:
         return record
 
     def provenance(self):
-        return dict(camera=self.camera.info, board=self.detector.cfg, board_file=str(self.board_path),
-                    window_xyxy=self.window, sampler="spacemit_manipulation.charuco_sampler")
+        return dict(
+            camera=self.camera.info,
+            board=self.detector.cfg,
+            board_file=str(self.board_path),
+            window_xyxy=self.window,
+            sampler="spacemit_manipulation.charuco_sampler",
+        )
 
     def dependencies(self):
         files = [self.board_path]

@@ -13,19 +13,30 @@
 #include <thread>
 
 namespace m = spacemit::manipulation;
+
 namespace {
-void Check(bool value, const char* detail) { if (!value) throw std::runtime_error(detail); }
+void Check(bool value, const char* detail) {
+    if (!value) throw std::runtime_error(detail);
+}
+
 void Reject(const std::function<void()>& operation, const char* detail) {
     bool rejected = false;
-    try { operation(); } catch (const std::exception&) { rejected = true; }
+    try {
+        operation();
+    } catch (const std::exception&) {
+        rejected = true;
+    }
     Check(rejected, detail);
 }
 
 class TestArm final : public m::Arm {
 public:
     m::ArmCapabilities GetCapabilities() const override { return {true, true, true}; }
+
     void Connect() override { ++connections; }
+
     void Disconnect() noexcept override {}
+
     m::ArmState Read() override {
         if (read_failure) throw std::runtime_error("injected read failure");
         m::ArmState state;
@@ -38,14 +49,21 @@ public:
         state.fault = fault;
         return state;
     }
+
     void Enable() override { enabled = true; }
+
     void Submit(const m::JointPoint& point) override {
         if (reject) throw m::CommandRejected("injected precondition refusal");
         ++writes;
         if (write_failure) throw std::runtime_error("injected write failure after partial send");
         if (!stall) position = point.target_rad.at(0);
     }
-    bool Hold() override { ++holds; return !stop_failure; }
+
+    bool Hold() override {
+        ++holds;
+        return !stop_failure;
+    }
+
     int connections = 0, writes = 0, holds = 0;
     double position = 0;
     std::uint64_t sample = 1;
@@ -61,8 +79,11 @@ void Reconnect(m::ArmSession& session) {
 void TestLockDirectory(const std::filesystem::path& root) {
     const auto created = root / "created";
     m::PrepareLockDirectory(created.string());
+
     struct stat info {};
-    Check(stat(created.c_str(), &info) == 0 && (info.st_mode & 07777) == 01777, "shared directory not sticky 1777");
+
+    Check(stat(created.c_str(), &info) == 0 && (info.st_mode & 07777) == 01777,
+          "shared directory not sticky 1777");
     m::PrepareLockDirectory(created.string());  // Existing valid directory is accepted.
     const auto open = root / "open";
     std::filesystem::create_directory(open);
@@ -76,7 +97,8 @@ void TestLockDirectory(const std::filesystem::path& root) {
 }  // namespace
 
 int main() {
-    auto pattern = (std::filesystem::temp_directory_path() / "manipulation-arm-test-XXXXXX").string();
+    auto pattern =
+            (std::filesystem::temp_directory_path() / "manipulation-arm-test-XXXXXX").string();
     Check(mkdtemp(pattern.data()) != nullptr, "cannot create test directory");
     const std::filesystem::path root(pattern);
     try {
@@ -100,18 +122,25 @@ int main() {
         Check(result.status == m::Result::kSucceeded, "reachable target did not succeed");
         raw->freeze = true;
         session.Submit({{0.2}, 0.05});
-        Check(session.Poll().status == m::Result::kRunning, "cached feedback counted as completion");
+        Check(session.Poll().status == m::Result::kRunning,
+              "cached feedback counted as completion");
         Reject([&] { session.Submit({{0.3}, 0.05}); }, "busy session accepted a second target");
-        Check(session.Cancel().status == m::Result::kCancelled, "verified hold not reported as cancelled");
+        Check(session.Cancel().status == m::Result::kCancelled,
+              "verified hold not reported as cancelled");
         raw->freeze = false;
 
         // A refusal before any write leaves the session usable and issues no stop.
         raw->reject = true;
         const auto holds = raw->holds;
         bool refused = false;
-        try { session.Submit({{0}, 0.05}); } catch (const m::CommandRejected&) { refused = true; }
+        try {
+            session.Submit({{0}, 0.05});
+        } catch (const m::CommandRejected&) {
+            refused = true;
+        }
         Check(refused && raw->holds == holds, "refusal was latched or triggered a stop");
-        Check(session.GetResult().status == m::Result::kCancelled, "refusal replaced the previous result");
+        Check(session.GetResult().status == m::Result::kCancelled,
+              "refusal replaced the previous result");
         raw->reject = false;
 
         // Stale feedback rejects new motion; stalled motion times out and latches.
@@ -130,20 +159,32 @@ int main() {
         // Unconfirmed stop, write failure and read failure all latch without replay.
         session.Submit({{0}, 0.05});
         raw->stop_failure = true;
-        Check(session.Cancel().status == m::Result::kStopUnknown, "unconfirmed stop reported as known");
+        Check(session.Cancel().status == m::Result::kStopUnknown,
+              "unconfirmed stop reported as known");
         Reject([&] { session.Submit({{0}, 0.05}); }, "stop_unknown did not latch");
         Reconnect(session);
         raw->write_failure = true;
-        Check(session.Submit({{0}, 0.05}).status == m::Result::kStopUnknown, "write failure reported as stopped");
+        Check(session.Submit({{0}, 0.05}).status == m::Result::kStopUnknown,
+              "write failure reported as stopped");
         Reject([&] { session.Submit({{0}, 0.05}); }, "write failure did not latch");
         raw->write_failure = false;
         raw->stop_failure = false;
         Reconnect(session);
         session.Submit({{0.4}, 0.05});
         raw->read_failure = true;
-        Check(session.Poll().status == m::Result::kFault, "read failure during motion not reported as fault");
+        Check(session.Poll().status == m::Result::kFault,
+              "read failure during motion not reported as fault");
         raw->read_failure = false;
         Reject([&] { session.Submit({{0}, 0.05}); }, "read failure did not latch");
+
+        // A hold without fresh feedback is attempted, but cannot be confirmed: it latches.
+        Reconnect(session);
+        raw->read_failure = raw->stop_failure = true;
+        const auto attempts = raw->holds;
+        Check(session.Hold().status == m::Result::kStopUnknown && raw->holds == attempts + 1,
+              "hold without feedback reported as confirmed or not attempted");
+        raw->read_failure = raw->stop_failure = false;
+        Reject([&] { session.Submit({{0}, 0.05}); }, "hold without feedback did not latch");
 
         // Explicit enable only; controller fault during motion latches.
         Reconnect(session);

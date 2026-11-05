@@ -7,6 +7,7 @@ Templates live in descriptions/robots/<model>/devices/<variant>.yaml. Placeholde
 ${datadir} ${libexecdir} ${bindir}: installation directories, written relative to the output;
 ${python}: interpreter command; ${name} / ${name:-default}: values from --set name=value.
 """
+
 import argparse
 import json
 import os
@@ -20,9 +21,16 @@ PLACEHOLDER = re.compile(r"\$\{([a-z_][a-z0-9_]*)(?::-([^}]*))?\}")
 def templates(prefix, layout, model):
     directory = prefix / layout["datadir"] / "manipulation/descriptions/robots" / model / "devices"
     if not directory.is_dir():
-        available = sorted(path.parent.parent.name for path in
-                           (prefix / layout["datadir"] / "manipulation/descriptions/robots").glob("*/devices"))
-        raise ValueError(f"no device templates for model {model!r}; available: {', '.join(available) or 'none'}")
+        available = sorted(
+            path.parent.name
+            for path in (prefix / layout["datadir"] / "manipulation/descriptions/robots").glob(
+                "*/devices"
+            )
+            if path.is_dir()
+        )
+        raise ValueError(
+            f"no device templates for model {model!r}; available: {', '.join(available) or 'none'}"
+        )
     return directory
 
 
@@ -33,7 +41,9 @@ def configure(prefix, model, output, variant="arm", values=None, python="python3
     template = directory / (variant + ".yaml")
     if not template.is_file():
         variants = sorted(path.stem for path in directory.glob("*.yaml"))
-        raise ValueError(f"model {model!r} has no variant {variant!r}; available: {', '.join(variants)}")
+        raise ValueError(
+            f"model {model!r} has no variant {variant!r}; available: {', '.join(variants)}"
+        )
     # Explicit interpreter paths are kept as given so a virtual environment stays selected.
     if "/" in python:
         python = str(Path(python).absolute())
@@ -48,15 +58,23 @@ def configure(prefix, model, output, variant="arm", values=None, python="python3
         if default is not None:
             return default
         raise ValueError(f"template value required: --set {name}=...")
+
     content = PLACEHOLDER.sub(substitute, template.read_text())
     driver = re.search(r"(?m)^\s*driver:\s*(\S+)", content)
     binary = prefix / layout["bindir"] / "manipulation-device"
-    drivers = subprocess.run([str(binary), "drivers"], check=True, capture_output=True, text=True).stdout.split()
+    drivers = subprocess.run(
+        [str(binary), "drivers"], check=True, capture_output=True, text=True
+    ).stdout.split()
     if not driver or driver.group(1) not in drivers:
-        raise ValueError(f"this installation does not include driver {driver.group(1) if driver else '?'}; "
-                         "rebuild with the matching driver option (mm -DMANIPULATION_ENABLE_NERO=ON)")
+        raise ValueError(
+            f"this installation does not include driver {driver.group(1) if driver else '?'}; "
+            "rebuild with the matching driver module enabled"
+        )
     if output.exists():
-        raise FileExistsError(f"{output} already exists; review or remove it before configuring again")
+        raise FileExistsError(
+            f"{output} already exists; select it with `manipulation use {model}`, "
+            "or move it aside to configure again"
+        )
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="utf-8") as stream:
         stream.write(content)
@@ -78,7 +96,9 @@ def parse_values(items):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("prefix")
     parser.add_argument("model")
     parser.add_argument("output")
@@ -86,7 +106,9 @@ def main():
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VALUE")
     parser.add_argument("--python", default="python3")
     args = parser.parse_args()
-    configure(args.prefix, args.model, args.output, args.variant, parse_values(args.set), args.python)
+    configure(
+        args.prefix, args.model, args.output, args.variant, parse_values(args.set), args.python
+    )
 
 
 if __name__ == "__main__":

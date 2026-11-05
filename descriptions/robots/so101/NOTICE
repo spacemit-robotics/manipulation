@@ -1,0 +1,9 @@
+SO101 model
+
+Derived from TheRobotStudio/SO-ARM100:
+https://github.com/TheRobotStudio/SO-ARM100
+Original file: Simulation/SO101/so101_new_calib.urdf.
+Copyright (c) 2023-2026 TheRobotStudio.
+Modifications copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+The model uses primitive geometry; no external mesh resources are included.
+Distributed under the Apache License, Version 2.0 (see LICENSE).

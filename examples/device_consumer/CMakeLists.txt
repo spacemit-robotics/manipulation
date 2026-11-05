@@ -3,4 +3,5 @@ project(device_consumer LANGUAGES CXX)
 find_package(manipulation CONFIG REQUIRED)
 add_executable(device-state device_state.cpp)
 target_compile_features(device-state PRIVATE cxx_std_17)
-target_link_libraries(device-state PRIVATE spacemit::manipulation_motion spacemit::manipulation_drivers)
+target_link_libraries(device-state PRIVATE spacemit::manipulation_motion
+    spacemit::manipulation_drivers)

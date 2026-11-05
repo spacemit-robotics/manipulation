@@ -1,0 +1,13 @@
+# C/C++ formatting for docs/coding_standards.md: Google style, 4-space indent, 100 columns.
+BasedOnStyle: Google
+IndentWidth: 4
+ContinuationIndentWidth: 8
+ColumnLimit: 100
+AccessModifierOffset: -4
+DerivePointerAlignment: false
+PointerAlignment: Left
+SortIncludes: Never
+SeparateDefinitionBlocks: Always
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
