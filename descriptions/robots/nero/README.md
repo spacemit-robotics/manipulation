@@ -1,14 +1,19 @@
 # Nero V120 设备描述
 
-关节顺序为 `joint1` 至 `joint7`，位置单位 rad；不包含 Revo2 或夹爪反馈。
-点位任务按七轴顺序提供目标。
+- 关节顺序为 `joint1` 至 `joint7`，位置单位为 rad；不包含 Revo2 或夹爪反馈。
+- 点位任务按七轴顺序提供目标。
+- 软件限位不是碰撞检测，不能替代现场工作空间检查。
 
-关节限位只有一个来源：厂商 SDK `components/thirdparty/pyagxarm/pyAgxArm/api/constants.py` 的 Nero 预设
-（版本见该组件 `UPSTREAM_COMMIT`）。设备模板与 URDF 的 `<limit>` 均使用该预设原值。
-该预设在《NERO 用户手册》关节运动范围内：J1–J6 各收窄 2°，J7 为 ±90°（手册 ±97°）。
-软件限位并非碰撞检测，不能替代现场工作空间检查。
+## 关节限位
 
-`nero_description.urdf` 使用 MIT 许可（见 `LICENSE`），`<limit>` 取自上述 SDK 预设。
-模型仅用于离线关节链计算，未复制可视化网格。
-`model.json` 明确 `base_link → link7` 和七轴顺序。URDF 中的网格引用在本包中不解析。
-正运动学不包含碰撞检测或实物 TCP 标定。现场 HOME、TCP、外参不作为通用模型发布。
+关节限位只有一个来源：厂商 SDK `components/thirdparty/pyagxarm/pyAgxArm/api/constants.py` 中的 Nero 预设
+（版本见该组件的 `UPSTREAM_COMMIT`）。设备模板与 URDF 的 `<limit>` 均使用该预设原值。
+
+该预设在《NERO 用户手册》的关节运动范围内：J1–J6 各收窄 2°，J7 为 ±90°（手册为 ±97°）。
+
+## 模型
+
+- `nero_description.urdf` 使用 MIT 许可（见 `LICENSE`），`<limit>` 取自上述 SDK 预设。
+- 模型仅用于离线关节链计算，未复制可视化网格；URDF 中的网格引用在本包中不解析。
+- `model.json` 指定 `base_link → link7` 和七轴顺序。
+- 正运动学不包含碰撞检测或实物 TCP 标定。现场的 HOME、TCP 和外参不作为通用模型发布。

@@ -4,7 +4,8 @@
 
 ## 1. 设备配置
 
-`manipulation configure MODEL` 按型号模板生成 `SITE/MODEL/device.yaml`，也可手写。文件为单个 YAML 文档，不超过 64 KiB，未知或重复字段一律拒绝。
+`manipulation configure MODEL` 按型号模板生成 `SITE/MODEL/device.yaml`，也可以手动编写。
+文件为单个 YAML 文档，不超过 64 KiB；未知字段或重复字段一律拒绝。
 
 ```yaml
 schema_version: 3
@@ -49,9 +50,9 @@ steps:                            # 0–128 步，run 按顺序执行
 | `position` | 新鲜、完整的位置和状态反馈 | 连续 3 个样本在容差内且静止时 `succeeded` | 驱动确认停止为 `cancelled`，否则 `stop_unknown` |
 | `none` | 只要求新鲜的在线样本 | 下发后等待 `duration_s`，结果 `unverified` | 始终 `stop_unknown` |
 
-- 所有末端的位置含义相同：`0` 闭合，`1` 张开，由驱动转换为设备自身的刻度。
+- 所有末端执行器的位置含义相同：`0` 为闭合，`1` 为张开，由驱动转换为设备自身的刻度。
 - `none` 只降低验证要求，不会让驱动声称具备反馈。
-- 经 Nero 末端口接入的 Revo2 静止时不上报位置，须用 `none`；此时以手指电流帧作为在线证据，手侧显示为 `unknown`。
+- 经 Nero 末端口接入的 Revo2 静止时不上报位置，须使用 `none`；此时以手指电流帧作为在线证据，手部状态显示为 `unknown`。
 
 ### 驱动选项
 
@@ -70,28 +71,30 @@ steps:                            # 0–128 步，run 按顺序执行
 | | `grip_load_threshold` | 判定夹住的最小负载，`1–1000`（额定输出的 0.1%），默认 `100` |
 
 **Nero / Revo2**：
+
 - 关节必须为 `joint1`–`joint7`；有末端时通道必须为 Revo2 的六个通道，顺序一致。
 - 速度倍率下限 0.01，控制器按整数百分比执行；末端单次动作不超过 2.55 s。
 
 **SO101**：
+
 - 关节顺序为 `shoulder_pan`、`shoulder_lift`、`elbow_flex`、`wrist_flex`、`wrist_roll`，夹爪通道为 `[gripper]` 且 `feedback: position`。
 - 关节角为 `ticks × 2π / 4095 − π`；夹爪位置为 `(ticks − closed_ticks) / (open_ticks − closed_ticks)`，支持开闭方向相反的安装。
 - 经 SDK `motor` 组件的 Feetech 驱动访问舵机，串口固定为 1 Mbps。连接时只读核对舵机型号、模式、中位偏移和反馈，不写 EEPROM、不使能、不归位。
-- 目标和扭矩逐个舵机写入并读回确认，不是同步写，各关节的开始时刻有几毫秒差异。
+- 目标和扭矩逐个舵机写入并读回确认，不是同步写入，各关节的开始时刻相差几毫秒。
 - **控制范围**：取配置限位与校准行程的交集。
   - 配置模板中前四个关节的限位为 ±π，实际范围由每台机械臂的校准行程决定；
   - `wrist_roll` 可整圈转动，校准行程为 0–4095，由配置限位（−157°～+163°，取自模型）约束；
   - 超出范围时拒绝使能或运动，报错列出每个超限关节的当前位置和允许范围。
-- 行程文件格式：
+- **校准文件格式**：
   - 机械臂按关节名保存 `id`、`homing_offset`、`range_min`、`range_max`；
-  - 夹爪保存 `motor_id`、`open_ticks`、`closed_ticks` 和 `homing_offset`。
-  - 夹爪文件可省略 `homing_offset`，此时驱动不核对夹爪偏移，文件只能用于偏移未改变的安装。
+  - 夹爪保存 `motor_id`、`open_ticks`、`closed_ticks` 和 `homing_offset`；
+  - 夹爪文件可省略 `homing_offset`，此时驱动不核对夹爪偏移，该文件只能用于偏移未改变的安装。
 - **抓握判断**（能力 `grasp_detection`）：
   - 闭合目标未到达、夹爪静止，且负载绝对值不低于 `grip_load_threshold` 时，`effector_holding` 为 `true`；
   - 连续三个这样的样本使动作以 `effector_grasp_holding` 成功结束；
   - 夹住时舵机的过载保护标志（状态位 5）不算故障；
   - `hand-hold` 保持原闭合目标。
-- 使能夹爪前核对最大扭矩不高于 500、保护电流不高于 250 mA。
+- 使能夹爪前，核对最大扭矩不高于 500、保护电流不高于 250 mA。
 - 不支持连续路径、定时轨迹或力控。
 
 ### 配置模板
@@ -119,7 +122,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `arm-check PLAN [--timeout-only]` | 关节 1 往返 0.01 rad，再测试取消和重连；`--timeout-only` 改为检查 1 ms 期限的超时锁定 |
 | `serve PLAN [--read-only \| --enable]` | 本机 JSONL 控制进程，供 Python 接口使用；`--read-only` 拒绝一切运动 |
 
-`serve` 的 `--allow-disable`、`--allow-effector-enable`、`--allow-effector-disable` 分别授权机械臂失能、末端使能、末端失能，默认关闭。
+`serve` 的 `--allow-disable`、`--allow-effector-enable`、`--allow-effector-disable` 分别授权机械臂失能、末端执行器使能和失能，默认均关闭。
 
 退出码：`0` 成功；`1` 任务未成功或被中断；`2` 参数、配置或连接错误；`3` 全部步骤完成，但含 `unverified` 步骤。
 
@@ -132,7 +135,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `enabled`、`position_mode`、`moving`、`fault` | 机械臂使能、位置模式、实际运动、故障（`true` / `false`） |
 | `latched` | 会话是否已锁定，锁定后须重新连接 |
 | `joints_rad` | 关节位置，按配置顺序 |
-| `effector_feedback` / `effector_positions` | 末端反馈类型 / 各通道位置（`0` 闭合，`1` 张开）；`none` 时位置为空数组 |
+| `effector_feedback` / `effector_positions` | 末端反馈类型 / 各通道位置（`0` 闭合，`1` 张开）；反馈类型为 `none` 时位置为空数组 |
 | `effector_enabled` | `true`、`false`，驱动无法读回时为 `null` |
 | `effector_loads` | 各通道负载 `[-1,1]`（额定输出的比例，符号为驱动方向），不提供时为空数组 |
 | `effector_holding` | 抓握判断；仅声明 `grasp_detection` 的末端给出 `true` / `false`，其他为 `null` |
@@ -142,7 +145,7 @@ steps:                            # 0–128 步，run 按顺序执行
 ### manipulation / hand-eye
 
 - 全局选项 `--site DIR` 写在子命令前，默认为 `$MANIPULATION_SITE` 或 `~/.local/share/spacemit-manipulation/site`。
-- 每种设备一个目录 `SITE/NAME/`，存放 `device.yaml`、姿态和校准文件。`SITE/device.yaml` 是指向当前设备配置的符号链接。
+- 每台设备一个目录 `SITE/NAME/`，存放 `device.yaml`、姿态和校准文件；`SITE/device.yaml` 是指向当前设备配置的符号链接。
 - 设备类子命令默认使用当前设备，可用 `--plan FILE` 替换。
 - 所有命令都不自动使能、清错或归位。
 
@@ -153,7 +156,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `use [NAME]` | 把 `SITE/NAME/device.yaml` 设为当前设备；省略 `NAME` 时只列出已配置的设备，`*` 标记当前设备 |
 | `validate` / `inspect` / `capabilities` | 同 `manipulation-device` 对应子命令 |
 | `monitor` | 只读，持续打印关节角（度）、状态、末端位置、负载与抓握判断；`--rate HZ`（1–20，默认 5）、`--count N` |
-| `enable` / `disable`、`hand-enable` / `hand-disable` | 使能 / 释放扭矩；失能前须支撑机械臂并卸载物品 |
+| `enable` / `disable`、`hand-enable` / `hand-disable` | 使能 / 释放扭矩；失能前须支撑机械臂并取下所持物品 |
 | `hold` / `hand-hold` | 保持当前位置，不释放扭矩 |
 | `joint-step JOINT DELTA` / `joint-move Q...` | 单关节相对 / 全部关节绝对点位，单位 rad；`JOINT` 为关节名或从 0 开始的序号；`--speed`（默认 0.05） |
 | `arm-check` | 同 `manipulation-device arm-check`，会运动 |
@@ -178,7 +181,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `measured_width_mm` / `measured_height_mm` | 成对填写打印后的实测宽、高 |
 | `window=FILE\|x0,y0,x1,y1` | 标定板须完整位于的图像区域 |
 
-求解残差门槛同时适用于全部样本与留出样本，实际门槛写入结果。
+求解残差阈值同时适用于全部样本与留出样本，实际使用的阈值写入结果。
 
 ### so101-calibrate
 
@@ -301,7 +304,7 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
   - 更新频率受设备往返时间限制；程序异常退出时，设备停在最后一个目标。
 - **容差**：`tolerance_rad` 不超过 0.8°，`0` 表示使用配置中的 `tolerance_rad`。
 - **重发**：`resend_interval_s`（`0`，或 0.02–0.2 s）在超出容差期间按该间隔原样重发目标。
-- **Nero 运动判定**：Nero 的"运动中"由关节反馈测得（0.2 s 内变化超过 0.05°）；停在目标外超过 1 s 时原样重发，最多 5 次。连续发送时控制器会留下零点几度的稳态偏差，需按场景给出容差。
+- **Nero 运动判定**：Nero 的“运动中”由关节反馈测得（0.2 s 内变化超过 0.05°）；停在目标外超过 1 s 时原样重发，最多 5 次。连续发送时控制器会留下零点几度的稳态偏差，须按场景设置容差。
 - **连续路径**：
   - 从当前位置出发，最多 128 个点，只在最后一点停下；
   - `max_velocity_rad_s`（≤0.35）和 `max_acceleration_rad_s2`（≤1.0）限制变化最大的关节；
@@ -329,6 +332,6 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `jacobian(model, joints_rad)` | 末端位姿与 6×N 几何雅可比（线速度行在前，基座坐标系） |
 
 - **姿态权重**：`orientation_weight` 为 0 时只求位置，为 1 时位置与姿态同等加权。
-- **收敛门槛**：位置 0.5 mm、姿态 0.01 rad，最多 200 次迭代；阻尼 1e-4，步长从 0.5 减半到 0.01，单步关节变化不超过 0.5 rad。
+- **收敛阈值**：位置 0.5 mm、姿态 0.01 rad，最多 200 次迭代；阻尼 1e-4，步长从 0.5 减半到 0.01，单步关节变化不超过 0.5 rad。
 - **限位**：`limits` 为配置中的 `[下限, 上限]`，与 URDF 限位取交集。
 - **未收敛结果**：`converged` 为 `false` 时只是最优近似，不能作为运动目标。
