@@ -22,7 +22,6 @@ import select
 import sys
 import termios
 import time
-import time
 
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
 MIDDLE = 2047  # Encoder ticks of the model zero pose (0 rad) after center.

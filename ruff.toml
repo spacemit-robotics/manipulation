@@ -2,7 +2,7 @@
 line-length = 100
 
 [lint]
-select = ["E501", "W", "N"]
+select = ["E501", "W", "N", "F"]
 
 [lint.per-file-ignores]
 # Stands in for the vendor package, so it keeps the vendor's module name.

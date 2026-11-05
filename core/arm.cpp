@@ -9,7 +9,6 @@
 #include <unistd.h>
 
 #include <algorithm>
-#include <atomic>
 #include <cerrno>
 #include <cmath>
 #include <filesystem>  // NOLINT(build/c++17): target explicitly requires C++17.
@@ -22,7 +21,6 @@ void Check(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
 }
 
-std::atomic<std::uint64_t> session_counter{0};
 // Keeps a request inside the worker frame limit.
 constexpr std::size_t kMaximumPathWaypoints = 128;
 // Streaming drivers send at most 0.4 deg per 20 ms step: about 20 deg/s is the honest ceiling.
@@ -64,7 +62,6 @@ struct ArmSession::Impl {
     DeviceConfig config;
     std::unique_ptr<Arm> arm;
     std::string directory;
-    std::string id;
     int lease = -1;
     bool connected = false;
     CommandResult result;
@@ -150,9 +147,6 @@ void ArmSession::Connect() {
         p.connected = true;
         Read();
         p.result = {};
-        p.id = std::to_string(getpid()) + "-" +
-               std::to_string(Clock::now().time_since_epoch().count()) + "-" +
-               std::to_string(++session_counter);
     } catch (...) {
         p.arm->Disconnect();
         p.connected = false;
@@ -545,7 +539,4 @@ const std::vector<double>& ArmSession::LastTarget() const {
     return impl_->point.target_rad;
 }
 
-const std::string& ArmSession::SessionId() const {
-    return impl_->id;
-}
 }  // namespace spacemit::manipulation

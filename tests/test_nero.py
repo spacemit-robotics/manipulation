@@ -168,8 +168,8 @@ class NeroIntegrationTests(unittest.TestCase):
         self.assertEqual(moves, [[0.5] * 7, [0.5] * 7])
 
     def test_point_resent_at_interval_completes_within_tolerance(self):
-        # The original controller-endpoint placement: the same target re-sent every 50 ms while off
-        # target, complete on two fresh samples within tolerance, before the arm is seen still.
+        # Controller-endpoint placement: the same target re-sent every 50 ms while off target,
+        # complete on two fresh samples within tolerance, before the arm is seen still.
         self.channel("can_drop")
         with DeviceClient(CLI, self.filename) as client:
             started = time.monotonic()
@@ -238,8 +238,8 @@ class NeroIntegrationTests(unittest.TestCase):
         )
 
     def test_stream_steady_state_error_within_path_tolerance_completes_in_js_mode(self):
-        # js mode stops a few tenths of a degree short; the path's own tolerance accepts that, as
-        # the original calibration did (0.8 deg), without switching modes or re-sending.
+        # js mode stops a few tenths of a degree short; the path's own tolerance (0.8 deg) accepts
+        # that, without switching modes or re-sending.
         self.channel("can_offset")
         with DeviceClient(CLI, self.filename) as client:
             result = client.move_arm_path(
@@ -352,8 +352,8 @@ class NeroIntegrationTests(unittest.TestCase):
         self.assertEqual([e["mode"] for e in events if e["op"] == "set_motion_mode"], ["js"])
 
     def test_trajectory_without_arrival_wait_hands_over_while_the_arm_settles(self):
-        # As the original FAST executor: the command completes once its last target is sent, and the
-        # next one starts from the measured position while the arm still converges.
+        # The command completes once its last target is sent, and the next one starts from the
+        # measured position while the arm still converges.
         self.channel("can_lag")
         times = [i / 100 for i in range(31)]
         out = [[0.1 * t / 0.3] * 7 for t in times]

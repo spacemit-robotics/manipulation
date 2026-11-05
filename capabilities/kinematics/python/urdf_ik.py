@@ -235,7 +235,7 @@ def line(
 
     The position is interpolated linearly and the orientation by spherical interpolation; every
     waypoint is solved from the previous one. One unreachable waypoint, or a joint jump that would
-    change IK branch, rejects the whole line before any motion (as the former move_line did).
+    change IK branch, rejects the whole line before any motion.
     """
     target = matrix(target)
     if not (math.isfinite(step_m) and step_m > 0):

@@ -44,7 +44,6 @@ public:
     bool Settling() const;
     // The final target of the last command (the one the arm settles toward while Settling()).
     const std::vector<double>& LastTarget() const;
-    const std::string& SessionId() const;
 
 private:
     void Ready();

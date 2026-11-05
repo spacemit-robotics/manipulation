@@ -356,9 +356,7 @@ def check(prefix):
         write(site / "cup_application.json", application)
         command("dice-arena", "inspect")
         assert command("dice-arena", "cycle").count('"status": "completed"') == 3
-        assert '"at_home": true' in command(
-            "dice-arena", "home"
-        )  # The original home action, no camera.
+        assert '"at_home": true' in command("dice-arena", "home")  # Home needs no camera.
 
         # The game runs from the installation: no game source, staging or copy.
         command("dice-arena", "stage", expected=2)

@@ -36,8 +36,8 @@ HISTORY_GAP_S = 0.05
 # Joint feedback is recorded in the background, so a read after an idle period never waits for
 # the window to fill.
 RECORD_PERIOD_S = 0.01
-# A point may ask for the original controller-endpoint delivery instead: the same target re-sent
-# at a fixed interval while beyond tolerance, whether or not the arm is moving.
+# A point may instead ask for controller-endpoint delivery: the same target re-sent at a fixed
+# interval while beyond tolerance, whether or not the arm is moving.
 RESEND_INTERVAL_RANGE_S = (0.02, 0.2)
 # Modes are switched explicitly, only on change; joint targets sent right after a switch can be
 # ignored, so a short pause follows each switch.
@@ -261,7 +261,7 @@ class AgxConnection:
             channel=self.channel,
         )
         self.robot = sdk.AgxArmFactory.create_arm(config)
-        self.robot.set_joint_limits_enabled(True)  # SDK-side clamp to the vendor preset, as before.
+        self.robot.set_joint_limits_enabled(True)  # SDK-side clamp to the vendor preset.
         self.robot.set_auto_set_motion_mode_enabled(False)  # Modes are set explicitly (set_mode).
         self.robot.connect()  # No enable, mode switch, home, reset or effector construction.
         self.recording.set()
@@ -626,8 +626,8 @@ class AgxConnection:
             (min(column) - margin, max(column) + margin)
             for column in zip(state["joints_rad"], *positions)
         ]
-        # A late tick advances time at most so far that the step stays within 0.9 max_step (as the
-        # original max_phase_step): the motion runs slower instead of jumping.
+        # A late tick advances time at most so far that the step stays within 0.9 max_step: the
+        # motion runs slower instead of jumping.
         peak = max(
             max(abs(b - a) for a, b in zip(p, q)) / (t2 - t1)
             for t1, t2, p, q in zip(times, times[1:], positions, positions[1:])

@@ -508,10 +508,10 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
     if (cancelled && cancelled())
         return {++p.command_id, Result::kCancelled, "cancelled before submission"};
     const auto arm = ReadArm();
-    // The arm may still be settling after a command that did not wait for arrival. It may keep
-    // converging to that command's target during the tool motion, as the original executor allowed;
-    // any other motion of more than kToolArmDrift (the original hand start tolerance) is a fault:
-    // a still arm must stay where it was, a settling one must not get farther from its target.
+    // The arm may still be settling after a command that did not wait for arrival, and may keep
+    // converging to that command's target during the tool motion. Any other motion of more than
+    // kToolArmDrift is a fault: a still arm must stay where it was, a settling one must not get
+    // farther from its target.
     CheckArmHolds(arm, p.arm->Settling());
     const auto reference = p.arm->Settling() ? p.arm->LastTarget() : arm.joints_rad;
     const auto distance = [&reference](const std::vector<double>& joints) {
