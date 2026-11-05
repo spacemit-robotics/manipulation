@@ -1,7 +1,7 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
-// Register access through the motor component's Feetech driver. motor_init is deliberately not called:
-// it rewrites the EEPROM mode on every connection, and a connection here must only read.
+// Register access through the motor component's Feetech driver. motor_init is deliberately not
+// called: it rewrites the EEPROM mode on every connection, and a connection here must only read.
 #include "feetech_bus.h"
 
 #include <fcntl.h>
@@ -32,19 +32,23 @@ public:
         saved_ = fcntl(STDOUT_FILENO, F_DUPFD_CLOEXEC, 3);
         if (saved_ >= 0) dup2(STDERR_FILENO, STDOUT_FILENO);
     }
+
     ~StdoutToStderr() {
         Flush();
         if (saved_ < 0) return;
         dup2(saved_, STDOUT_FILENO);
         close(saved_);
     }
+
     StdoutToStderr(const StdoutToStderr&) = delete;
     StdoutToStderr& operator=(const StdoutToStderr&) = delete;
+
 private:
     static void Flush() {
         std::cout.flush();
         std::fflush(stdout);
     }
+
     int saved_ = -1;
 };
 }  // namespace
@@ -95,8 +99,9 @@ feetech_bus* feetech_bus_open(const char* port, const uint8_t* ids, size_t count
     {
         StdoutToStderr quiet;
         for (size_t i = 0; i < count && !error; ++i) {
-            motor_dev* servo = ids[i] >= 1 && ids[i] <= 253 && !bus->servos.count(ids[i]) ?
-                motor_alloc_uart(kDriver, port, kBaud, ids[i], nullptr) : nullptr;
+            motor_dev* servo = ids[i] >= 1 && ids[i] <= 253 && !bus->servos.count(ids[i])
+                                       ? motor_alloc_uart(kDriver, port, kBaud, ids[i], nullptr)
+                                       : nullptr;
             if (servo) {
                 bus->servos[ids[i]] = servo;
             } else {
@@ -130,7 +135,8 @@ int feetech_bus_read(feetech_bus* bus, uint8_t id, uint8_t address, uint8_t* dat
     return 0;
 }
 
-int feetech_bus_write(feetech_bus* bus, uint8_t id, uint8_t address, const uint8_t* data, size_t length) {
+int feetech_bus_write(feetech_bus* bus, uint8_t id, uint8_t address, const uint8_t* data,
+                      size_t length) {
     motor_dev* servo = Servo(bus, id, address, data, length);
     if (!servo) return -1;
     std::vector<uint8_t> actual(length);

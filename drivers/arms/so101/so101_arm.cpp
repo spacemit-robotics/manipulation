@@ -13,7 +13,9 @@ class So101Arm final : public Arm {
 public:
     So101Arm(DeviceConfig definition, std::shared_ptr<SharedSession> session)
         : definition_(std::move(definition)), session_(std::move(session)) {}
+
     ~So101Arm() override { Disconnect(); }
+
     ArmCapabilities GetCapabilities() const override {
         ArmCapabilities capabilities;
         capabilities.joint_point = true;
@@ -23,6 +25,7 @@ public:
         capabilities.minimum_speed_scale = kSpeedTickRadS / session_->Config().maximum_velocity;
         return capabilities;
     }
+
     void Connect() override {
         if (connected_) throw std::runtime_error("SO101 arm already connected");
         session_->Connect();
@@ -34,10 +37,12 @@ public:
             throw;
         }
     }
+
     void Disconnect() noexcept override {
         if (connected_) session_->Disconnect();
         connected_ = false;
     }
+
     ArmState Read() override {
         if (!connected_) throw std::runtime_error("SO101 arm disconnected");
         ArmState state;
@@ -51,8 +56,9 @@ public:
                 const auto& calibration = settings.calibration[i];
                 if (sample.offset != calibration.offset || sample.minimum > calibration.minimum ||
                     sample.maximum < calibration.maximum) {
-                    throw std::runtime_error("SO101 motor " + std::to_string(settings.ids[i]) +
-                        " calibration differs from the installed servo configuration");
+                    throw std::runtime_error(
+                            "SO101 motor " + std::to_string(settings.ids[i]) +
+                            " calibration differs from the installed servo configuration");
                 }
             }
             samples_[i] = sample;
@@ -63,19 +69,24 @@ public:
             state.fault = state.fault || sample.fault;
             if (!state.firmware.empty()) state.firmware += ",";
             state.firmware += std::to_string(settings.ids[i]) + ":" + sample.firmware;
-            const int minimum = settings.arm_calibrated ? settings.calibration[i].minimum : sample.minimum;
-            const int maximum = settings.arm_calibrated ? settings.calibration[i].maximum : sample.maximum;
-            state.controller_limits.push_back({JointPosition(minimum), JointPosition(maximum),
-                settings.maximum_velocity, 0});
+            const int minimum =
+                    settings.arm_calibrated ? settings.calibration[i].minimum : sample.minimum;
+            const int maximum =
+                    settings.arm_calibrated ? settings.calibration[i].maximum : sample.maximum;
+            state.controller_limits.push_back(
+                    {JointPosition(minimum), JointPosition(maximum), settings.maximum_velocity, 0});
         }
         state.sample_id = ++sample_id_;
-        state.source_time_s = std::chrono::duration<double>(state.received_at.time_since_epoch()).count();
+        state.source_time_s =
+                std::chrono::duration<double>(state.received_at.time_since_epoch()).count();
         state.valid = true;
-        if (std::chrono::duration<double>(Clock::now() - state.received_at).count() > definition_.maximum_age_s) {
+        if (std::chrono::duration<double>(Clock::now() - state.received_at).count() >
+            definition_.maximum_age_s) {
             throw std::runtime_error("SO101 complete arm feedback exceeded maximum_age_s");
         }
         return state;
     }
+
     void Enable() override {
         RequireCalibration();
         const auto state = Read();
@@ -99,8 +110,10 @@ public:
         }
         session_->Torque(Ids(), true);
         const auto after = Read();
-        if (!after.enabled || after.fault) throw std::runtime_error("SO101 arm enable not confirmed");
+        if (!after.enabled || after.fault)
+            throw std::runtime_error("SO101 arm enable not confirmed");
     }
+
     void Disable() override {
         Read();
         session_->Torque(Ids(), false);
@@ -109,11 +122,13 @@ public:
             if (sample.enabled) throw std::runtime_error("SO101 arm disable not confirmed");
         }
     }
+
     void Submit(const JointPoint& point) override {
         RequireCalibration();
         if (point.target_rad.size() != kArmJoints || !std::isfinite(point.speed_scale) ||
             point.speed_scale <= 0 || point.speed_scale > 1 || point.resend_interval_s != 0) {
-            throw CommandRejected("SO101 requires five joints, speed_scale in (0,1], no resend interval");
+            throw CommandRejected(
+                    "SO101 requires five joints, speed_scale in (0,1], no resend interval");
         }
         if (point.speed_scale < GetCapabilities().minimum_speed_scale) {
             throw CommandRejected("SO101 speed is below one encoder tick per second");
@@ -125,13 +140,16 @@ public:
             ticks.push_back(target);
         }
         const auto state = Read();
-        // The session decides whether a moving arm may take this target (it is settling from our own command).
+        // The session decides whether a moving arm may take this target (it is settling from our
+        // own command).
         if (!state.position_mode || state.fault) {
             throw CommandRejected("SO101 requires fault-free position-mode feedback");
         }
-        if (!state.enabled) throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
+        if (!state.enabled)
+            throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
         session_->Target(Ids(), ticks, Velocities(point.speed_scale));
     }
+
     bool Hold() override {
         const auto initial = Read();
         if (!initial.enabled || !initial.position_mode || initial.fault) return false;
@@ -154,35 +172,43 @@ public:
         }
         return false;
     }
+
 private:
     void RequireCalibration() const {
         if (!session_->Config().arm_calibrated) {
             throw CommandRejected("SO101 arm_calibration is required before enabling or moving");
         }
     }
+
     void CheckMode(const ArmState& state) const {
         if (!state.position_mode || state.fault || state.moving) {
             throw CommandRejected("SO101 requires stationary, fault-free position-mode feedback");
         }
     }
+
     void CheckPosition(size_t index, double radians, int ticks) const {
         const auto& limit = definition_.joints[index];
         const auto& calibration = session_->Config().calibration[index];
         if (!std::isfinite(radians) || radians < limit.minimum_rad || radians > limit.maximum_rad ||
             ticks < calibration.minimum || ticks > calibration.maximum) {
-            throw CommandRejected("SO101 target is outside configured/calibrated limits: " + limit.name);
+            throw CommandRejected("SO101 target is outside configured/calibrated limits: " +
+                                  limit.name);
         }
     }
+
     std::vector<uint8_t> Ids() const {
         const auto& ids = session_->Config().ids;
         return {ids.begin(), ids.end()};
     }
+
     std::vector<double> Velocities(double scale) const {
         return std::vector<double>(kArmJoints, session_->Config().maximum_velocity * scale);
     }
+
     std::vector<double> HoldVelocities() const {
         return std::vector<double>(kArmJoints, std::min(session_->Config().maximum_velocity, 0.05));
     }
+
     DeviceConfig definition_;
     std::shared_ptr<SharedSession> session_;
     std::array<Sample, kArmJoints> samples_{};
@@ -191,7 +217,8 @@ private:
 };
 }  // namespace
 
-std::unique_ptr<Arm> MakeArm(const DeviceConfig& definition, std::shared_ptr<SharedSession> session) {
+std::unique_ptr<Arm> MakeArm(const DeviceConfig& definition,
+                             std::shared_ptr<SharedSession> session) {
     return std::make_unique<So101Arm>(definition, std::move(session));
 }
 }  // namespace spacemit::manipulation::so101

@@ -7,7 +7,8 @@
 std::string JsonString(const std::string& text);
 // Offline driver capabilities; no device connection or write.
 std::string DeviceCapabilitiesJson(const spacemit::manipulation::DeviceSession& session);
-int ServeDevice(spacemit::manipulation::DeviceSession& session, bool allow_motion, bool allow_enable,
-    const std::function<bool()>& interrupted, const std::string& driver, bool allow_disable = false,
-    bool allow_effector_enable = false, bool allow_effector_disable = false);
+int ServeDevice(spacemit::manipulation::DeviceSession& session, bool allow_motion,
+                bool allow_enable, const std::function<bool()>& interrupted,
+                const std::string& driver, bool allow_disable = false,
+                bool allow_effector_enable = false, bool allow_effector_disable = false);
 #endif  // MANIPULATION_CAPABILITIES_MOTION_CLI_DEVICE_SERVICE_H_

@@ -5,12 +5,14 @@
 #include <string>
 #include <vector>
 #include "manipulation/device.h"
+
 namespace spacemit::manipulation {
 struct DeviceStep {
     std::string capability;
     JointPoint arm;
     EffectorPoint effector;
 };
+
 struct DevicePlan {
     DeviceDefinition definition;
     std::string driver;
@@ -18,8 +20,9 @@ struct DevicePlan {
     DriverOptions options;
     std::vector<DeviceStep> steps;
 };
+
 DevicePlan LoadDevicePlan(const std::string& filename, const DeviceRegistry& registry);
 CommandResult RunDeviceSteps(DeviceSession& session, const std::vector<DeviceStep>& steps,
-    const std::function<bool()>& cancelled = {});
+                             const std::function<bool()>& cancelled = {});
 }  // namespace spacemit::manipulation
 #endif  // MANIPULATION_DEVICE_PLAN_H_

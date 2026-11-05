@@ -1,6 +1,8 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
-"""Offline inverse kinematics and Cartesian line tests on the installed robot descriptions (numpy)."""
+"""Offline inverse kinematics and Cartesian line tests on the installed robot descriptions
+(numpy)."""
+
 import importlib.util
 import json
 import math
@@ -29,7 +31,9 @@ ik = module("spacemit_manipulation.urdf_ik", "capabilities/kinematics/python/urd
 def load(name):
     path = ROOT / "descriptions/robots" / name / "model.json"
     config = json.loads(path.read_text())
-    return fk.UrdfKinematics(path.parent / config["urdf"], config["base"], config["tip"], config["joints"])
+    return fk.UrdfKinematics(
+        path.parent / config["urdf"], config["base"], config["tip"], config["joints"]
+    )
 
 
 def sample(model, generator, margin=0.2):
@@ -50,13 +54,21 @@ class KinematicsTests(unittest.TestCase):
                 other = ik.matrix(model.forward(moved, check_limits=False))
                 linear = (other[:3, 3] - tip[:3, 3]) / 1e-6
                 angular = ik.rotation_vector(other[:3, :3] @ tip[:3, :3].T) / 1e-6
-                np.testing.assert_allclose(jacobian[:, index], np.concatenate([linear, angular]), atol=1e-5,
-                                           err_msg=f"{name} joint {index}")
+                np.testing.assert_allclose(
+                    jacobian[:, index],
+                    np.concatenate([linear, angular]),
+                    atol=1e-5,
+                    err_msg=f"{name} joint {index}",
+                )
 
     def test_pose_helpers_round_trip(self):
         generator = random.Random(2)
         for _ in range(50):
-            angles = [generator.uniform(-3, 3), generator.uniform(-1.5, 1.5), generator.uniform(-3, 3)]
+            angles = [
+                generator.uniform(-3, 3),
+                generator.uniform(-1.5, 1.5),
+                generator.uniform(-3, 3),
+            ]
             rotation = ik.rpy_matrix(*angles)
             np.testing.assert_allclose(ik.rpy_matrix(*ik.rpy(rotation)), rotation, atol=1e-9)
             vector = ik.rotation_vector(rotation)
@@ -75,10 +87,16 @@ class KinematicsTests(unittest.TestCase):
                 result = ik.solve(model, target, seed)
                 self.assertTrue(result["converged"], (name, result))
                 self.assertLessEqual(result["position_error_m"], ik.POSITION_TOLERANCE_M)
-                reached = ik.matrix(model.forward(result["joints_rad"]))  # Raises outside the URDF limits.
-                self.assertLessEqual(np.linalg.norm(reached[:3, 3] - target[:3, 3]), ik.POSITION_TOLERANCE_M)
-                self.assertTrue(np.all(result["joints_rad"] >= bounds[:, 0]) and
-                                np.all(result["joints_rad"] <= bounds[:, 1]))
+                reached = ik.matrix(
+                    model.forward(result["joints_rad"])
+                )  # Raises outside the URDF limits.
+                self.assertLessEqual(
+                    np.linalg.norm(reached[:3, 3] - target[:3, 3]), ik.POSITION_TOLERANCE_M
+                )
+                self.assertTrue(
+                    np.all(result["joints_rad"] >= bounds[:, 0])
+                    and np.all(result["joints_rad"] <= bounds[:, 1])
+                )
 
     def test_full_pose_converges_with_orientation(self):
         generator = random.Random(4)
@@ -104,7 +122,9 @@ class KinematicsTests(unittest.TestCase):
         self.assertLessEqual(abs(result["joints_rad"][0]), 0.1)
         self.assertFalse(result["converged"])
         with self.assertRaises(ValueError):
-            ik.solve(model, far, [0] * 5, limits=[[4, 5]] + [list(pair) for pair in model.limits[1:]])
+            ik.solve(
+                model, far, [0] * 5, limits=[[4, 5]] + [list(pair) for pair in model.limits[1:]]
+            )
         with self.assertRaises(ValueError):
             ik.solve(model, far, [0] * 4)
         with self.assertRaises(ValueError):
@@ -112,22 +132,34 @@ class KinematicsTests(unittest.TestCase):
 
     def test_line_is_straight_and_continuous(self):
         for name, model in self.models.items():
-            start = [0.1, 0.3, 0.4, 0.2, 0.1] if name == "so101" else [0.1, 0.5, 0.1, 1.2, 0.1, 0.3, 0.1]
+            start = (
+                [0.1, 0.3, 0.4, 0.2, 0.1]
+                if name == "so101"
+                else [0.1, 0.5, 0.1, 1.2, 0.1, 0.3, 0.1]
+            )
             origin = ik.matrix(model.forward(start))
             target = ik.pose(origin[:3, 3] + [0.03, -0.02, 0.02], orientation=origin[:3, :3])
             weight = 0.0 if name == "so101" else 1.0
             waypoints = ik.line(model, start, target, step_m=0.005, orientation_weight=weight)
             self.assertEqual(len(waypoints), math.ceil(np.linalg.norm([0.03, -0.02, 0.02]) / 0.005))
-            direction = (target[:3, 3] - origin[:3, 3]) / np.linalg.norm(target[:3, 3] - origin[:3, 3])
+            direction = (target[:3, 3] - origin[:3, 3]) / np.linalg.norm(
+                target[:3, 3] - origin[:3, 3]
+            )
             previous = start
             for joints in waypoints:
                 point = ik.matrix(model.forward(joints))[:3, 3] - origin[:3, 3]
-                self.assertLess(np.linalg.norm(point - direction * (point @ direction)), 0.001, name)
-                self.assertLessEqual(max(abs(a - b) for a, b in zip(joints, previous)),
-                                     ik.LINE_MAXIMUM_JOINT_JUMP_RAD)
+                self.assertLess(
+                    np.linalg.norm(point - direction * (point @ direction)), 0.001, name
+                )
+                self.assertLessEqual(
+                    max(abs(a - b) for a, b in zip(joints, previous)),
+                    ik.LINE_MAXIMUM_JOINT_JUMP_RAD,
+                )
                 previous = joints
             end = ik.matrix(model.forward(waypoints[-1]))
-            self.assertLessEqual(np.linalg.norm(end[:3, 3] - target[:3, 3]), ik.POSITION_TOLERANCE_M)
+            self.assertLessEqual(
+                np.linalg.norm(end[:3, 3] - target[:3, 3]), ik.POSITION_TOLERANCE_M
+            )
 
     def test_line_rejects_unreachable_and_oversized_lines_before_motion(self):
         model = self.models["so101"]

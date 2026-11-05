@@ -19,7 +19,9 @@ extern char** environ;
 
 namespace spacemit::manipulation::agx {
 
-WorkerChannel::~WorkerChannel() { Close(); }
+WorkerChannel::~WorkerChannel() {
+    Close();
+}
 
 void WorkerChannel::Start(const std::vector<std::string>& arguments) {
     if (socket_ >= 0 || arguments.empty()) throw std::runtime_error("invalid worker start");
@@ -51,17 +53,28 @@ void WorkerChannel::Start(const std::vector<std::string>& arguments) {
     posix_spawnattr_destroy(&attributes);
     posix_spawn_file_actions_destroy(&actions);
     close(pair[1]);
-    if (result != 0) { close(pair[0]); pid_ = -1; throw std::runtime_error("worker spawn failed"); }
+    if (result != 0) {
+        close(pair[0]);
+        pid_ = -1;
+        throw std::runtime_error("worker spawn failed");
+    }
     socket_ = pair[0];
     request_ = 0;
-    session_ = std::to_string(getpid()) + "-" + std::to_string(Clock::now().time_since_epoch().count());
+    session_ = std::to_string(getpid()) + "-" +
+               std::to_string(Clock::now().time_since_epoch().count());
 }
 
 void WorkerChannel::Wait(short events, Clock::time_point deadline) {
     while (true) {
-        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
+        const auto remaining =
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now())
+                        .count();
         if (remaining <= 0) throw std::runtime_error("worker RPC timed out; physical stop unknown");
-        struct pollfd item {socket_, events, 0};
+
+        struct pollfd item {
+            socket_, events, 0
+        };
+
         const int result = poll(&item, 1, static_cast<int>(remaining));
         if (result < 0 && errno == EINTR) continue;
         if (result <= 0) throw std::runtime_error("worker RPC poll timeout/failure");
@@ -73,17 +86,21 @@ void WorkerChannel::Wait(short events, Clock::time_point deadline) {
 YAML::Node WorkerChannel::Call(const std::string& operation, const std::string& fields) {
     if (socket_ < 0) throw std::runtime_error("worker not connected");
     const auto deadline = Clock::now() + std::chrono::seconds(3);
-    const auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
-        deadline.time_since_epoch()).count();
+    const auto nanoseconds =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(deadline.time_since_epoch())
+                    .count();
     const auto id = ++request_;
-    const std::string request = "{\"v\":1,\"session\":\"" + session_ + "\",\"id\":" + std::to_string(id) +
-        ",\"deadline_ns\":" + std::to_string(nanoseconds) + ",\"op\":\"" + operation + "\"" + fields + "}\n";
+    const std::string request = "{\"v\":1,\"session\":\"" + session_ +
+                                "\",\"id\":" + std::to_string(id) +
+                                ",\"deadline_ns\":" + std::to_string(nanoseconds) + ",\"op\":\"" +
+                                operation + "\"" + fields + "}\n";
     bool rejected = false;
     try {
         std::size_t offset = 0;
         while (offset < request.size()) {
             Wait(POLLOUT, deadline);
-            const auto size = send(socket_, request.data() + offset, request.size() - offset, MSG_NOSIGNAL);
+            const auto size =
+                    send(socket_, request.data() + offset, request.size() - offset, MSG_NOSIGNAL);
             if (size < 0 && (errno == EAGAIN || errno == EINTR)) continue;
             if (size <= 0) throw std::runtime_error("worker write failed");
             offset += static_cast<std::size_t>(size);
@@ -98,10 +115,12 @@ YAML::Node WorkerChannel::Call(const std::string& operation, const std::string& 
             response.append(bytes, static_cast<std::size_t>(size));
             if (response.size() > 32768) throw std::runtime_error("worker response oversized");
         }
-        if (response.find('\n') != response.size() - 1) throw std::runtime_error("unexpected worker frame");
+        if (response.find('\n') != response.size() - 1)
+            throw std::runtime_error("unexpected worker frame");
         const auto node = YAML::Load(response);
         if (node["v"].as<int>() != 1 || node["session"].as<std::string>() != session_ ||
-            node["id"].as<std::uint64_t>() != id) throw std::runtime_error("worker response identity mismatch");
+            node["id"].as<std::uint64_t>() != id)
+            throw std::runtime_error("worker response identity mismatch");
         if (node["ok"].as<bool>()) return node["data"];
         rejected = node["rejected"] && node["rejected"].as<bool>();
         throw std::runtime_error(node["error"].as<std::string>());
@@ -117,15 +136,23 @@ YAML::Node WorkerChannel::Call(const std::string& operation, const std::string& 
 }
 
 void WorkerChannel::Close() noexcept {
-    if (socket_ >= 0) { shutdown(socket_, SHUT_RDWR); close(socket_); socket_ = -1; }
+    if (socket_ >= 0) {
+        shutdown(socket_, SHUT_RDWR);
+        close(socket_);
+        socket_ = -1;
+    }
     if (pid_ <= 0) return;
     for (int attempt = 0; attempt < 20; ++attempt) {
         const auto result = waitpid(pid_, nullptr, WNOHANG);
-        if (result == pid_ || (result < 0 && errno == ECHILD)) { pid_ = -1; return; }
+        if (result == pid_ || (result < 0 && errno == ECHILD)) {
+            pid_ = -1;
+            return;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     kill(pid_, SIGKILL);
-    while (waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {}
+    while (waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {
+    }
     pid_ = -1;
 }
 }  // namespace spacemit::manipulation::agx

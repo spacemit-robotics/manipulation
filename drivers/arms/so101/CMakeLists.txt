@@ -4,7 +4,8 @@
 add_library(manipulation_feetech_bus SHARED ../../common/so101_session/feetech_bus.cpp)
 target_compile_features(manipulation_feetech_bus PRIVATE cxx_std_17)
 target_link_libraries(manipulation_feetech_bus PRIVATE ${MANIPULATION_MOTOR_TARGET})
-target_link_options(manipulation_feetech_bus PRIVATE  # The driver registers itself from a static constructor.
+# The driver registers itself from a static constructor.
+target_link_options(manipulation_feetech_bus PRIVATE
     "LINKER:--whole-archive,$<TARGET_FILE:${MANIPULATION_MOTOR_TARGET}>,--no-whole-archive"
     "LINKER:--exclude-libs,libmotor.a")
 set_target_properties(manipulation_feetech_bus PROPERTIES VERSION 1.0.0 SOVERSION 1)

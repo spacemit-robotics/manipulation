@@ -2,6 +2,7 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Registered SO101 driver through real PTY packets and the normal local device service."""
+
 import errno
 import importlib.util
 import json
@@ -55,7 +56,7 @@ class ServoBus:
         self.thread.start()
 
     def word(self, motor_id, address, value):
-        self.registers[motor_id][address:address + 2] = value.to_bytes(2, "little")
+        self.registers[motor_id][address : address + 2] = value.to_bytes(2, "little")
 
     def close(self):
         self.done.set()
@@ -85,14 +86,16 @@ class ServoBus:
                     address, data = parameters[0], parameters[1:]
                     self.writes.append((motor_id, address, data))
                     if not (address == 42 and self.drop_goals):  # Acknowledged even when lost.
-                        self.registers[motor_id][address:address + len(data)] = data
+                        self.registers[motor_id][address : address + len(data)] = data
                         if address == 42 and self.registers[motor_id][40]:
                             stop = self.stall.get(motor_id)
-                            self.registers[motor_id][56:58] = data[:2] if stop is None else stop.to_bytes(2, "little")
+                            self.registers[motor_id][56:58] = (
+                                data[:2] if stop is None else stop.to_bytes(2, "little")
+                            )
                     payload = b""
                 elif instruction == 2:
                     address, width = parameters
-                    payload = bytes(self.registers[motor_id][address:address + width])
+                    payload = bytes(self.registers[motor_id][address : address + width])
                 else:
                     return
                 body = bytes([motor_id, len(payload) + 2, 0]) + payload
@@ -111,7 +114,7 @@ class ServoBus:
                         time.sleep(self.response_delay)
                     if failure == "fragment":
                         for offset in range(0, len(reply), 7):
-                            os.write(self.master, reply[offset:offset + 7])
+                            os.write(self.master, reply[offset : offset + 7])
                             time.sleep(0.0005)
                     else:
                         os.write(self.master, reply)
@@ -126,14 +129,26 @@ class So101Tests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         self.bus = ServoBus()
         self.addCleanup(self.bus.close)
-        self.arm_calibration = {name: dict(id=i + 1, homing_offset=0,
-                                         range_min=300, range_max=3800) for i, name in enumerate(JOINTS)}
+        self.arm_calibration = {
+            name: dict(id=i + 1, homing_offset=0, range_min=300, range_max=3800)
+            for i, name in enumerate(JOINTS)
+        }
         self.gripper_calibration = dict(motor_id=6, closed_ticks=2031, open_ticks=3468)
-        self.plan = dict(schema_version=3, device=dict(driver="so101", model="so101",
-            arm=dict(device_id="arm_main", resource_id="so101_test_" + self.directory.name,
-                     maximum_age_s=0.5, joints=[dict(name=name, minimum_rad=-2, maximum_rad=2)
-                                               for name in JOINTS]),
-            options=dict(port=self.bus.port, arm_calibration="arm.json")), steps=[])
+        self.plan = dict(
+            schema_version=3,
+            device=dict(
+                driver="so101",
+                model="so101",
+                arm=dict(
+                    device_id="arm_main",
+                    resource_id="so101_test_" + self.directory.name,
+                    maximum_age_s=0.5,
+                    joints=[dict(name=name, minimum_rad=-2, maximum_rad=2) for name in JOINTS],
+                ),
+                options=dict(port=self.bus.port, arm_calibration="arm.json"),
+            ),
+            steps=[],
+        )
         self.filename = self.directory / "device.json"
         self.save()
 
@@ -143,18 +158,27 @@ class So101Tests(unittest.TestCase):
         (self.directory / "gripper.json").write_text(json.dumps(self.gripper_calibration))
 
     def gripper(self):
-        self.plan["device"]["effector"] = dict(device_id="gripper_main", channels=["gripper"],
-                                             feedback="position", maximum_age_s=0.5)
+        self.plan["device"]["effector"] = dict(
+            device_id="gripper_main", channels=["gripper"], feedback="position", maximum_age_s=0.5
+        )
         self.plan["device"]["options"]["gripper_calibration"] = "gripper.json"
         self.save()
 
     def client(self, motion=True):
-        return DeviceClient(CLI, self.filename, allow_motion=motion, allow_enable=motion,
-                            allow_disable=motion, allow_effector_enable=motion,
-                            allow_effector_disable=motion)
+        return DeviceClient(
+            CLI,
+            self.filename,
+            allow_motion=motion,
+            allow_enable=motion,
+            allow_disable=motion,
+            allow_effector_enable=motion,
+            allow_effector_disable=motion,
+        )
 
     def call(self, command):
-        return subprocess.run([CLI, command, str(self.filename)], text=True, capture_output=True, timeout=5)
+        return subprocess.run(
+            [CLI, command, str(self.filename)], text=True, capture_output=True, timeout=5
+        )
 
     def test_connect_inspect_disconnect_never_writes(self):
         self.gripper()
@@ -236,7 +260,11 @@ class So101Tests(unittest.TestCase):
             self.assertEqual(self.bus.writes, [])
             client.move_arm([0.1] * 5, 0.123)
         speed_tick_rad_s = 2 * math.pi / 4096
-        speeds = [int.from_bytes(data[4:6], "little") for _, address, data in self.bus.writes if address == 42]
+        speeds = [
+            int.from_bytes(data[4:6], "little")
+            for _, address, data in self.bus.writes
+            if address == 42
+        ]
         self.assertTrue(speeds)
         self.assertTrue(all(0 < value * speed_tick_rad_s <= 0.123 for value in speeds))
 
@@ -287,7 +315,9 @@ class So101Tests(unittest.TestCase):
             with self.client() as client:
                 for position in (0, 0.5, 1):
                     self.assertEqual(client.move_effector([position])["status"], "succeeded")
-                    self.assertAlmostEqual(client.state()["effector_positions"][0], position, delta=0.001)
+                    self.assertAlmostEqual(
+                        client.state()["effector_positions"][0], position, delta=0.001
+                    )
                 self.assertEqual(client.hold_effector()["status"], "succeeded")
                 client.disable_effector()
                 self.assertFalse(client.state()["effector_enabled"])
@@ -295,17 +325,28 @@ class So101Tests(unittest.TestCase):
                 self.assertTrue(client.state()["effector_enabled"])
 
     def test_follow_replaces_targets_while_moving_and_stops_on_hold(self):
-        self.bus.stall = {motor_id: 2048 for motor_id in range(1, 6)}  # The arm never reaches a target here.
+        self.bus.stall = {
+            motor_id: 2048 for motor_id in range(1, 6)
+        }  # The arm never reaches a target here.
         with self.client() as client:
             goals = ([0.05] * 5, [0.1] * 5, [0.15] * 5)
             result = client.follow_arm(goals[0], 0.5)
             self.assertEqual((result["status"], result["detail"][:4]), ("succeeded", "sent"))
-            self.bus.registers[1][66] = 1  # Now reported moving: a later target may replace the goal.
+            self.bus.registers[1][66] = (
+                1  # Now reported moving: a later target may replace the goal.
+            )
             for goal in goals[1:]:
                 self.assertEqual(client.follow_arm(goal, 0.5)["status"], "succeeded")
-            sent = [data for motor_id, address, data in self.bus.writes if motor_id == 1 and address == 42]
+            sent = [
+                data
+                for motor_id, address, data in self.bus.writes
+                if motor_id == 1 and address == 42
+            ]
             self.assertEqual(len(sent), 3)
-            self.assertEqual(int.from_bytes(sent[-1][:2], "little"), round((0.15 + math.pi) * 4095 / (2 * math.pi)))
+            self.assertEqual(
+                int.from_bytes(sent[-1][:2], "little"),
+                round((0.15 + math.pi) * 4095 / (2 * math.pi)),
+            )
             self.bus.registers[1][66] = 0
             self.assertEqual(client.hold_arm()["status"], "succeeded")
             goal = bytes(self.bus.registers[1][42:44])
@@ -315,9 +356,15 @@ class So101Tests(unittest.TestCase):
     def test_point_moves_hand_over_while_the_arm_still_moves(self):
         # line-move on a driver without paths: the next waypoint starts before the arm is still.
         with self.client() as client:
-            self.assertIn("within_tolerance", client.move_arm([0.05] * 5, 0.5, wait_for_arrival=False)["detail"])
+            self.assertIn(
+                "within_tolerance",
+                client.move_arm([0.05] * 5, 0.5, wait_for_arrival=False)["detail"],
+            )
             self.bus.registers[1][66] = 1
-            self.assertIn("within_tolerance", client.move_arm([0.1] * 5, 0.5, wait_for_arrival=False)["detail"])
+            self.assertIn(
+                "within_tolerance",
+                client.move_arm([0.1] * 5, 0.5, wait_for_arrival=False)["detail"],
+            )
             self.bus.registers[1][66] = 0
             self.assertIn("target_reached", client.move_arm([0.15] * 5, 0.5)["detail"])
 
@@ -358,20 +405,29 @@ class So101Tests(unittest.TestCase):
         self.gripper()
         with self.client() as client:
             self.assertTrue(client.capabilities()["effector"]["grasp_detection"])
-            # Closing on an object: blocked short of the closed position, load above grip_load_threshold.
+            # Closing on an object: blocked short of the closed position, load above
+            # grip_load_threshold.
             self.bus.stall[6] = 2600
-            self.bus.word(6, 60, 0x400 | 300)  # Present_Load 300 in the negative direction (bit 10).
+            self.bus.word(
+                6, 60, 0x400 | 300
+            )  # Present_Load 300 in the negative direction (bit 10).
             result = client.move_effector([0])
-            self.assertEqual((result["status"], result["detail"], result["physical_grip_verified"]),
-                             ("succeeded", "effector_grasp_holding", True))
+            self.assertEqual(
+                (result["status"], result["detail"], result["physical_grip_verified"]),
+                ("succeeded", "effector_grasp_holding", True),
+            )
             state = client.state()
             self.assertTrue(state["effector_holding"])
             self.assertAlmostEqual(state["effector_loads"][0], -0.3)
             goals = [write for write in self.bus.writes if write[:2] == (6, 42)]
             self.assertEqual(client.hold_effector()["status"], "succeeded")
-            self.assertEqual([write for write in self.bus.writes if write[:2] == (6, 42)], goals,
-                             "a hold released the grasp")
-            # Holding long enough trips overload protection (status bit 5): still a grasp, not a fault.
+            self.assertEqual(
+                [write for write in self.bus.writes if write[:2] == (6, 42)],
+                goals,
+                "a hold released the grasp",
+            )
+            # Holding long enough trips overload protection (status bit 5): still a grasp, not a
+            # fault.
             self.bus.registers[6][65] = 0x20
             self.assertFalse(client.state()["effector_fault"])
             self.bus.registers[6][65] = 0
@@ -380,7 +436,10 @@ class So101Tests(unittest.TestCase):
             self.bus.word(6, 60, 0)
             self.assertEqual(client.move_effector([1])["detail"], "effector_position_reached")
             result = client.move_effector([0])
-            self.assertEqual((result["detail"], result["physical_grip_verified"]), ("effector_position_reached", False))
+            self.assertEqual(
+                (result["detail"], result["physical_grip_verified"]),
+                ("effector_position_reached", False),
+            )
             self.assertFalse(client.state()["effector_holding"])
             self.bus.registers[6][65] = 0x04  # Any other servo error remains a fault.
             self.assertTrue(client.state()["effector_fault"])
@@ -436,7 +495,9 @@ class So101Tests(unittest.TestCase):
                 start = time.monotonic()
                 result = self.call("inspect")
                 self.assertNotEqual(result.returncode, 0)
-                self.assertLess(time.monotonic() - start, 5)  # A stalled frame: about 3 s of driver retries.
+                self.assertLess(
+                    time.monotonic() - start, 5
+                )  # A stalled frame: about 3 s of driver retries.
         self.assertEqual(self.bus.writes, [])
 
     def test_port_alias_exclusive_even_with_distinct_resource_id(self):
@@ -466,8 +527,22 @@ class BusTests(unittest.TestCase):
             temporary = tempfile.TemporaryDirectory(prefix="so101-site-")
             self.addCleanup(temporary.cleanup)
             site = temporary.name
-        return subprocess.run([sys.executable, str(CALIBRATE), *arguments, "--port", self.bus.port, "--library", LIBRARY,
-                               "--site", str(site)], text=True, capture_output=True, timeout=20)
+        return subprocess.run(
+            [
+                sys.executable,
+                str(CALIBRATE),
+                *arguments,
+                "--port",
+                self.bus.port,
+                "--library",
+                LIBRARY,
+                "--site",
+                str(site),
+            ],
+            text=True,
+            capture_output=True,
+            timeout=20,
+        )
 
     def test_status_keeps_stdout_machine_readable_and_never_writes(self):
         result = self.tool("status")
@@ -481,7 +556,9 @@ class BusTests(unittest.TestCase):
         result = self.tool("configure", "--part", "arm")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.bus.registers[1][21], 16)
-        written = [(address, bytes(data)) for motor_id, address, data in self.bus.writes if motor_id == 1]
+        written = [
+            (address, bytes(data)) for motor_id, address, data in self.bus.writes if motor_id == 1
+        ]
         self.assertEqual(written, [(55, b"\x00"), (21, b"\x10"), (55, b"\x01")])
         self.assertFalse(any(address == 40 for _, address, _ in self.bus.writes))
         self.bus.writes.clear()
@@ -493,27 +570,39 @@ class BusTests(unittest.TestCase):
             missing = self.tool("limits", site=site)
             self.assertEqual(missing.returncode, 1)
             self.assertIn("so101-calibrate capture", missing.stderr)
-            arm = {name: dict(id=index + 1, homing_offset=0, range_min=1000, range_max=3000)
-                   for index, name in enumerate(JOINTS)}
+            arm = {
+                name: dict(id=index + 1, homing_offset=0, range_min=1000, range_max=3000)
+                for index, name in enumerate(JOINTS)
+            }
             (Path(site) / "so101").mkdir()
             (Path(site) / "so101/so101_calibration.json").write_text(json.dumps(arm))
             (Path(site) / "so101/so101_gripper_calibration.json").write_text(
-                json.dumps(dict(motor_id=6, open_ticks=3400, closed_ticks=2000, homing_offset=0)))
+                json.dumps(dict(motor_id=6, open_ticks=3400, closed_ticks=2000, homing_offset=0))
+            )
             result = self.tool("limits", site=site)
             self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([(self.bus.registers[i][9:11], self.bus.registers[i][11:13]) for i in (1, 6)],
-                         [((1000).to_bytes(2, "little"), (3000).to_bytes(2, "little")),
-                          ((2000).to_bytes(2, "little"), (3400).to_bytes(2, "little"))])
+        self.assertEqual(
+            [(self.bus.registers[i][9:11], self.bus.registers[i][11:13]) for i in (1, 6)],
+            [
+                ((1000).to_bytes(2, "little"), (3000).to_bytes(2, "little")),
+                ((2000).to_bytes(2, "little"), (3400).to_bytes(2, "little")),
+            ],
+        )
 
     def test_capture_and_all_keep_an_existing_site_file_without_bus_traffic(self):
         for operation in ("capture", "all"):
-            with self.subTest(operation=operation), tempfile.TemporaryDirectory(prefix="so101-site-") as site:
+            with (
+                self.subTest(operation=operation),
+                tempfile.TemporaryDirectory(prefix="so101-site-") as site,
+            ):
                 (Path(site) / "so101").mkdir()
                 (Path(site) / "so101/so101_gripper_calibration.json").write_text("{}")
                 result = self.tool(operation, site=site)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("existing calibration kept", result.stderr)
-                self.assertEqual((Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}")
+                self.assertEqual(
+                    (Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}"
+                )
                 self.assertFalse((Path(site) / "so101/so101_calibration.json").exists())
         self.assertEqual(self.bus.requests, [])
 

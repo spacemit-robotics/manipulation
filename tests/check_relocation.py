@@ -2,6 +2,7 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Verify a moved installation from an unrelated cwd, using Mock devices only."""
+
 import argparse
 import json
 import os
@@ -16,8 +17,15 @@ def run(arguments, directory):
     environment.pop("PYTHONPATH", None)
     environment.pop("LD_LIBRARY_PATH", None)
     environment.pop("MANIPULATION_PYTHON", None)
-    result = subprocess.run([str(value) for value in arguments], cwd=directory, env=environment,
-                            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=90)
+    result = subprocess.run(
+        [str(value) for value in arguments],
+        cwd=directory,
+        env=environment,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)
     return result.stdout
@@ -56,16 +64,33 @@ def check(prefix):
         for script in ("calibrate.sh", "calibrate_web.sh", "calibration_web_service.sh"):
             output = run(["bash", app / script, "--help"], directory)
             assert "usage:" in output.lower(), output
-        output = run([moved / layout["bindir"] / "manipulation-device", "run",
-                      moved / layout["datadir"] /
-                      "manipulation/examples/point_sequence/point_sequence.yaml"], directory)
+        output = run(
+            [
+                moved / layout["bindir"] / "manipulation-device",
+                "run",
+                moved
+                / layout["datadir"]
+                / "manipulation/examples/point_sequence/point_sequence.yaml",
+            ],
+            directory,
+        )
         assert '"status":"succeeded"' in output, output
         config_file = moved / layout["datadir"] / "dice_arena/config/mock.json"
         relative_paths(json.loads(config_file.read_text()), config_file.parent, moved)
         for variant in ("arm", "revo2_right"):
             site = moved / "site" / variant
-            run([moved / layout["bindir"] / "manipulation", "--site", site, "configure", "nero",
-                 "--variant", variant], directory)
+            run(
+                [
+                    moved / layout["bindir"] / "manipulation",
+                    "--site",
+                    site,
+                    "configure",
+                    "nero",
+                    "--variant",
+                    variant,
+                ],
+                directory,
+            )
             content = (site / "device.yaml").read_text()
             assert str(prefix) not in content and str(moved) not in content
 
@@ -81,11 +106,26 @@ def check(prefix):
         # The installed public-interface example must not need a source checkout.
         consumer = moved / layout["datadir"] / "manipulation/examples/device_consumer"
         build = temporary / "consumer build"
-        run(["cmake", "-S", consumer, "-B", build, "-DCMAKE_PREFIX_PATH=" + str(moved),
-             "-Dmanipulation_DIR=" + str(moved / layout["libdir"] / "cmake/manipulation")], directory)
+        run(
+            [
+                "cmake",
+                "-S",
+                consumer,
+                "-B",
+                build,
+                "-DCMAKE_PREFIX_PATH=" + str(moved),
+                "-Dmanipulation_DIR=" + str(moved / layout["libdir"] / "cmake/manipulation"),
+            ],
+            directory,
+        )
         run(["cmake", "--build", build, "-j2"], directory)
-        output = run([build / "device-state", moved / layout["datadir"] /
-                      "manipulation/examples/mock_device.yaml"], directory)
+        output = run(
+            [
+                build / "device-state",
+                moved / layout["datadir"] / "manipulation/examples/mock_device.yaml",
+            ],
+            directory,
+        )
         assert "joints=2 moving=0" in output, output
 
         # Exercise the installed site generator with an offline algorithm fixture.
@@ -96,28 +136,49 @@ def check(prefix):
         (pipeline / "__init__.py").write_text("")
         (pipeline / "green_pipeline.py").write_text(
             "import json\nfrom pathlib import Path\ndef load_config(path):\n"
-            "    return json.loads(Path(path).read_text())\ndef validate(config):\n    return config\n")
+            "    return json.loads(Path(path).read_text())\n"
+            "def validate(config):\n    return config\n"
+        )
         green = source / "green.json"
         green.write_text(json.dumps(dict(open_targets_0_100=[0] * 6, grip_targets_0_100=[10] * 6)))
         gestures = source / "configs/actions/gestures"
         gestures.mkdir(parents=True)
-        (gestures / "result_feedback.json").write_text(json.dumps(dict(gestures={
-            name: dict(hand_0_100=[0] * 6) for name in ("yeah", "thumbs-up", "tie")})))
+        (gestures / "result_feedback.json").write_text(
+            json.dumps(
+                dict(
+                    gestures={
+                        name: dict(hand_0_100=[0] * 6) for name in ("yeah", "thumbs-up", "tie")
+                    }
+                )
+            )
+        )
         application = moved / "site/application.json"
         generator = moved / layout["datadir"] / "dice_arena/tools/configure_site.py"
         plan = moved / layout["datadir"] / "manipulation/examples/mock_device.yaml"
-        run(["python3", generator, moved, plan, source, green, moved / "site/runtime", application], directory)
+        run(
+            ["python3", generator, moved, plan, source, green, moved / "site/runtime", application],
+            directory,
+        )
         site = json.loads(application.read_text())
-        assert all(not Path(site[key]).is_absolute() for key in
-                   ("executable", "device_plan", "policy_library", "grip_ack_directory"))
-        assert all(not Path(site["planner"][key]).is_absolute() for key in
-                   ("source_root", "config", "session_directory"))
+        assert all(
+            not Path(site[key]).is_absolute()
+            for key in ("executable", "device_plan", "policy_library", "grip_ack_directory")
+        )
+        assert all(
+            not Path(site["planner"][key]).is_absolute()
+            for key in ("source_root", "config", "session_directory")
+        )
 
         # The installed game runs from the moved prefix with the Mock cup application.
-        output = run([moved / layout["bindir"] / "dice-arena", "--site", moved / "site", "check"], directory)
+        output = run(
+            [moved / layout["bindir"] / "dice-arena", "--site", moved / "site", "check"], directory
+        )
         assert '"mock_cycle": "passed"' in output, output
 
-    print("relocation: passed (Mock, public C++ consumer, relative device/application/game configurations)")
+    print(
+        "relocation: passed (Mock, public C++ consumer, relative device/application/game "
+        "configurations)"
+    )
 
 
 def main():

@@ -2,6 +2,7 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Check build/runtime dependencies without opening CAN, cameras or audio devices."""
+
 import argparse
 import importlib
 import json
@@ -26,7 +27,9 @@ def check(profile, prefix=None):
             if result.returncode:
                 failures.append("missing development package: yaml-cpp")
         if shutil.which("cmake"):
-            output = subprocess.run(["cmake", "--version"], check=True, capture_output=True, text=True).stdout
+            output = subprocess.run(
+                ["cmake", "--version"], check=True, capture_output=True, text=True
+            ).stdout
             version = tuple(int(item) for item in output.splitlines()[0].split()[-1].split(".")[:2])
             if version < (3, 16):
                 failures.append("CMake 3.16 or newer is required")
@@ -34,8 +37,13 @@ def check(profile, prefix=None):
         modules = ["can", "typing_extensions", "numpy"]
         if profile == "vision":
             modules += ["scipy", "cv2", "pyrealsense2"]
-            if shutil.which("pkg-config") and subprocess.run(["pkg-config", "--exists", "opencv4"]).returncode:
-                failures.append("missing development package: opencv4 (needed to build calibration)")
+            if (
+                shutil.which("pkg-config")
+                and subprocess.run(["pkg-config", "--exists", "opencv4"]).returncode
+            ):
+                failures.append(
+                    "missing development package: opencv4 (needed to build calibration)"
+                )
         for module in modules:
             try:
                 loaded = importlib.import_module(module)
@@ -72,9 +80,15 @@ def main():
     for failure in failures:
         print("MISSING: " + failure, file=sys.stderr)
     if failures:
-        print("Building with mm checks and installs the apt dependencies declared in package.xml.", file=sys.stderr)
+        print(
+            "Building with mm checks and installs the apt dependencies declared in package.xml.",
+            file=sys.stderr,
+        )
         if args.profile == "vision":
-            print("pyrealsense2 is not an apt package: install it for this Python and CPU.", file=sys.stderr)
+            print(
+                "pyrealsense2 is not an apt package: install it for this Python and CPU.",
+                file=sys.stderr,
+            )
         return 1
     print("environment " + args.profile + ": passed (no hardware accessed)")
     return 0

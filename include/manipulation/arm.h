@@ -31,7 +31,8 @@ struct ArmState {
     bool fault = false;
     std::string firmware;
     std::vector<ControllerJointLimit> controller_limits;  // Read by Diagnose(); empty when unknown.
-    bool command_active = false;  // The driver is still delivering the last command (e.g. streaming).
+    // The driver is still delivering the last command (e.g. streaming).
+    bool command_active = false;
 };
 
 // Controller speed ratio, NOT a physical velocity bound in rad/s.
@@ -43,7 +44,8 @@ struct ArmState {
 struct JointPoint {
     std::vector<double> target_rad;
     double speed_scale = 0.05;
-    double tolerance_rad = 0;  // Arrival tolerance; 0: the device's tolerance_rad (at most 0.8 deg).
+    // Arrival tolerance; 0: the device's tolerance_rad (at most 0.8 deg).
+    double tolerance_rad = 0;
     bool wait_for_arrival = true;
     double resend_interval_s = 0;
 };
@@ -64,8 +66,8 @@ struct JointPath {
 // A timed joint trajectory: knots (times_s[i], positions_rad[i]) from times_s[0] = 0, interpolated
 // linearly and streamed at command_rate_hz. The first knot must be the current position; no
 // commanded step may exceed max_step_rad. Arrival at the last knot as for JointPath, or, with
-// wait_for_arrival false, completion once the last knot is delivered: the arm may still be settling,
-// and the next command may start from wherever it is.
+// wait_for_arrival false, completion once the last knot is delivered: the arm may still be
+// settling, and the next command may start from wherever it is.
 struct JointTrajectory {
     std::vector<double> times_s;
     std::vector<std::vector<double>> positions_rad;
@@ -98,10 +100,11 @@ public:
     virtual void Disconnect() noexcept = 0;
     virtual ArmState Read() = 0;
     virtual ArmState Diagnose();  // Explicit active parameter/firmware queries, no motion.
-    virtual void Enable();  // Explicit operation; default: unsupported.
-    virtual void Disable();  // Explicit torque release; default: rejected without a write.
+    virtual void Enable();        // Explicit operation; default: unsupported.
+    virtual void Disable();       // Explicit torque release; default: rejected without a write.
     virtual void Submit(const JointPoint& point) = 0;  // Acceptance, not completion.
-    virtual void SubmitPath(const JointPath& path);  // Acceptance; default: rejected, nothing written.
+    // Acceptance; default: rejected, nothing written.
+    virtual void SubmitPath(const JointPath& path);
     virtual void SubmitTrajectory(const JointTrajectory& trajectory);  // Same; default: rejected.
     virtual bool Hold() = 0;  // True only after distinct fresh feedback confirms stop.
 };

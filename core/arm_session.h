@@ -35,7 +35,8 @@ public:
     // Sends the target and completes at once; the next target may start while the arm moves.
     CommandResult Follow(const JointPoint& point);
     CommandResult SubmitPath(const JointPath& path);  // Completion is judged at the last waypoint.
-    CommandResult SubmitTrajectory(const JointTrajectory& trajectory);  // Likewise, at the last knot.
+    // Likewise, at the last knot.
+    CommandResult SubmitTrajectory(const JointTrajectory& trajectory);
     CommandResult Poll();
     CommandResult Cancel();
     CommandResult GetResult() const;
@@ -53,7 +54,7 @@ private:
     enum class Completion { kArrival, kDelivered, kWithinTolerance };
     template <typename Extra, typename Write>
     CommandResult Begin(const JointPoint& final_point, double tolerance_rad, Completion completion,
-        Extra extra_time_s, Write write);
+                        Extra extra_time_s, Write write);
     void Stop(Result result, const std::string& detail);
     struct Impl;
     std::unique_ptr<Impl> impl_;

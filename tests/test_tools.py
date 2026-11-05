@@ -1,6 +1,7 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Offline FK, promotion and restore tests; stdlib only, no camera or vendor SDK."""
+
 import importlib.util
 import json
 import os
@@ -45,7 +46,9 @@ class ConfigurationTests(unittest.TestCase):
             prefix = Path(temporary)
             expected = prefix / "share/manipulation/descriptions/robots/alpha_arm/devices"
             expected.mkdir(parents=True)
-            self.assertEqual(configuration.templates(prefix, {"datadir": "share"}, "alpha_arm"), expected)
+            self.assertEqual(
+                configuration.templates(prefix, {"datadir": "share"}, "alpha_arm"), expected
+            )
 
     def test_no_installed_model_reports_none(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -62,13 +65,18 @@ class DependencyTests(unittest.TestCase):
         self.assertTrue(overlay.samefile(vendor / "package.xml"))
         package = ET.parse(ROOT / "package.xml").getroot()
         self.assertIn("pyagxarm", [item.text for item in package.findall("depend")])
-        self.assertEqual({item.text for item in package.findall("system_depend")},
-                         {"libyaml-cpp-dev", "python3-numpy"})
+        self.assertEqual(
+            {item.text for item in package.findall("system_depend")},
+            {"libyaml-cpp-dev", "python3-numpy"},
+        )
         dependencies = ET.parse(vendor / "package.xml").getroot().findall("system_depend")
-        self.assertEqual({item.text for item in dependencies},
-                         {"python3-can", "python3-typing-extensions"})
-        self.assertEqual({item.get("check") for item in dependencies},
-                         {"python3 -c 'import can'", "python3 -c 'import typing_extensions'"})
+        self.assertEqual(
+            {item.text for item in dependencies}, {"python3-can", "python3-typing-extensions"}
+        )
+        self.assertEqual(
+            {item.get("check") for item in dependencies},
+            {"python3 -c 'import can'", "python3 -c 'import typing_extensions'"},
+        )
 
     def test_sdk_dependency_closure_preserves_runtime_requirements(self):
         sdk = ROOT.parents[2]
@@ -83,31 +91,53 @@ while IFS= read -r package; do
 done < <(resolve_nonros2_dependency_closure "$2" 1)
 """
         for package, expected_packages, expected_dependencies in (
-                ("components/thirdparty/pyagxarm", ["components/thirdparty/pyagxarm"],
-                 {"python3-can", "python3-typing-extensions"}),
-                ("components/control/manipulation",
-                 ["components/thirdparty/pyagxarm", "components/control/manipulation"],
-                 {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy"})):
+            (
+                "components/thirdparty/pyagxarm",
+                ["components/thirdparty/pyagxarm"],
+                {"python3-can", "python3-typing-extensions"},
+            ),
+            (
+                "components/control/manipulation",
+                ["components/thirdparty/pyagxarm", "components/control/manipulation"],
+                {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy"},
+            ),
+        ):
             with self.subTest(package=package), tempfile.TemporaryDirectory() as temporary:
                 environment = dict(os.environ)
-                for key in ("BUILD_CONFIG_FILE", "BUILD_TARGET", "BUILD_TARGET_FILE",
-                            "SDK_BUILD_ARCH", "SDK_BUILD_BOARD", "SROBOTIS_CROSS_BUILD"):
+                for key in (
+                    "BUILD_CONFIG_FILE",
+                    "BUILD_TARGET",
+                    "BUILD_TARGET_FILE",
+                    "SDK_BUILD_ARCH",
+                    "SDK_BUILD_BOARD",
+                    "SROBOTIS_CROSS_BUILD",
+                ):
                     environment.pop(key, None)
-                result = subprocess.run(["bash", "-c", script, "dependency-test", str(sdk), package],
-                                        cwd=temporary, env=environment, check=True,
-                                        capture_output=True, text=True, timeout=15)
+                result = subprocess.run(
+                    ["bash", "-c", script, "dependency-test", str(sdk), package],
+                    cwd=temporary,
+                    env=environment,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
                 lines = [line.split("|", 2) for line in result.stdout.splitlines()]
-                self.assertEqual([line[1] for line in lines if line[0] == "package"],
-                                 expected_packages)
-                self.assertEqual({line[1] for line in lines if line[0] == "required"},
-                                 expected_dependencies)
+                self.assertEqual(
+                    [line[1] for line in lines if line[0] == "package"], expected_packages
+                )
+                self.assertEqual(
+                    {line[1] for line in lines if line[0] == "required"}, expected_dependencies
+                )
 
 
 class ToolTests(unittest.TestCase):
     def test_urdf_order_limits_and_rigidity(self):
         path = ROOT / "descriptions/robots/nero/model.json"
         config = json.loads(path.read_text())
-        model = fk.UrdfKinematics(path.parent / config["urdf"], config["base"], config["tip"], config["joints"])
+        model = fk.UrdfKinematics(
+            path.parent / config["urdf"], config["base"], config["tip"], config["joints"]
+        )
         fk.validate_transform(model.forward([0] * 7))
         with self.assertRaises(ValueError):
             model.forward([100] * 7)
@@ -123,26 +153,51 @@ class ToolTests(unittest.TestCase):
         import ast
         import re
         import xml.etree.ElementTree as ET
+
         constants = ROOT.parents[1] / "thirdparty/pyagxarm/pyAgxArm/api/constants.py"
-        preset = next(ast.literal_eval(node.value)["nero"] for node in ast.walk(ast.parse(constants.read_text()))
-                      if isinstance(node, ast.Assign)
-                      and any(getattr(t, "id", "") == "ROBOT_JOINT_LIMIT_PRESET_RAD" for t in node.targets))
+        preset = next(
+            ast.literal_eval(node.value)["nero"]
+            for node in ast.walk(ast.parse(constants.read_text()))
+            if isinstance(node, ast.Assign)
+            and any(getattr(t, "id", "") == "ROBOT_JOINT_LIMIT_PRESET_RAD" for t in node.targets)
+        )
         urdf = ET.parse(ROOT / "descriptions/robots/nero/nero_description.urdf").getroot()
-        self.assertEqual({joint.get("name"): [float(joint.find("limit").get(k)) for k in ("lower", "upper")]
-                          for joint in urdf.findall("joint") if joint.get("type") == "revolute"}, preset)
+        self.assertEqual(
+            {
+                joint.get("name"): [float(joint.find("limit").get(k)) for k in ("lower", "upper")]
+                for joint in urdf.findall("joint")
+                if joint.get("type") == "revolute"
+            },
+            preset,
+        )
         for template in ("arm.yaml", "revo2_right.yaml"):
             text = (ROOT / "descriptions/robots/nero/devices" / template).read_text()
-            found = {name: [float(low), float(high)] for name, low, high in re.findall(
-                r"\{name: (joint\d), minimum_rad: ([-0-9.]+), maximum_rad: ([-0-9.]+)\}", text)}
+            found = {
+                name: [float(low), float(high)]
+                for name, low, high in re.findall(
+                    r"\{name: (joint\d), minimum_rad: ([-0-9.]+), maximum_rad: ([-0-9.]+)\}", text
+                )
+            }
             self.assertEqual(found, preset, template)
 
     def test_promote_restore_exclusive_create_and_quality_gate(self):
-        report = dict(schema_version=1, setup="eye_to_hand", quality_passed=True,
-                      T_base_camera=fk.identity(), holdout_translation_m=0, holdout_rotation_rad=0,
-                      maximum_translation_m=0, maximum_rotation_rad=0)
+        report = dict(
+            schema_version=1,
+            setup="eye_to_hand",
+            quality_passed=True,
+            T_base_camera=fk.identity(),
+            holdout_translation_m=0,
+            holdout_rotation_rad=0,
+            maximum_translation_m=0,
+            maximum_rotation_rad=0,
+        )
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            candidate, active, restored = root / "candidate.json", root / "active.json", root / "restored.json"
+            candidate, active, restored = (
+                root / "candidate.json",
+                root / "active.json",
+                root / "restored.json",
+            )
             work.save_new(candidate, report)
             work.promote(candidate, active)
             self.assertEqual(work.load(active)["T_base_camera"], fk.identity())

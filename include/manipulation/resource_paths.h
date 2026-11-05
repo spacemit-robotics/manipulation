@@ -13,6 +13,7 @@ namespace spacemit::manipulation {
 // Resolve declared resource paths against directory. Bare executable names use PATH.
 // Missing options and absolute paths are retained for normal driver validation.
 DriverOptions ResolveResourceOptions(const DriverOptions& options, const std::string& directory,
-    const std::vector<std::string>& resources, const std::vector<std::string>& executables);
+                                     const std::vector<std::string>& resources,
+                                     const std::vector<std::string>& executables);
 }  // namespace spacemit::manipulation
 #endif  // MANIPULATION_RESOURCE_PATHS_H_

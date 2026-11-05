@@ -16,7 +16,7 @@ namespace spacemit::manipulation {
 // Requires an already enabled, stationary, normal arm; never enables, homes or clears faults.
 // Returns 0 when every step succeeded, 1 when a step failed or was interrupted.
 int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool timeout_only,
-    const std::function<bool()>& interrupted, std::ostream& out);
+                const std::function<bool()>& interrupted, std::ostream& out);
 
 }  // namespace spacemit::manipulation
 #endif  // MANIPULATION_CAPABILITIES_DIAGNOSTICS_ARM_CHECK_H_

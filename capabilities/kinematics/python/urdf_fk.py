@@ -1,14 +1,18 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """Offline fixed/revolute URDF chain, independent of any vendor connection."""
+
 import math
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
 
 def multiply(first, second):
-    return [sum(first[row * 4 + k] * second[k * 4 + col] for k in range(4))
-            for row in range(4) for col in range(4)]
+    return [
+        sum(first[row * 4 + k] * second[k * 4 + col] for k in range(4))
+        for row in range(4)
+        for col in range(4)
+    ]
 
 
 def identity():
@@ -18,17 +22,19 @@ def identity():
 def validate_transform(pose):
     if len(pose) != 16 or not all(math.isfinite(v) for v in pose):
         raise ValueError("requires 16 finite transform entries")
-    if any(abs(a-b) > 1e-8 for a, b in zip(pose[12:], [0, 0, 0, 1])):
+    if any(abs(a - b) > 1e-8 for a, b in zip(pose[12:], [0, 0, 0, 1])):
         raise ValueError("invalid homogeneous row")
     for first in range(3):
         for second in range(3):
-            dot = sum(pose[k*4+first] * pose[k*4+second] for k in range(3))
+            dot = sum(pose[k * 4 + first] * pose[k * 4 + second] for k in range(3))
             if abs(dot - (1 if first == second else 0)) > 1e-6:
                 raise ValueError("nonorthogonal rotation")
-    determinant = (pose[0]*(pose[5]*pose[10]-pose[6]*pose[9]) -
-                   pose[1]*(pose[4]*pose[10]-pose[6]*pose[8]) +
-                   pose[2]*(pose[4]*pose[9]-pose[5]*pose[8]))
-    if abs(determinant-1) > 1e-6:
+    determinant = (
+        pose[0] * (pose[5] * pose[10] - pose[6] * pose[9])
+        - pose[1] * (pose[4] * pose[10] - pose[6] * pose[8])
+        + pose[2] * (pose[4] * pose[9] - pose[5] * pose[8])
+    )
+    if abs(determinant - 1) > 1e-6:
         raise ValueError("improper rotation")
 
 
@@ -39,9 +45,24 @@ def rotation(axis, angle):
     x, y, z = [value / length for value in axis]
     cosine, sine = math.cos(angle), math.sin(angle)
     one = 1 - cosine
-    return [cosine+x*x*one, x*y*one-z*sine, x*z*one+y*sine, 0,
-            y*x*one+z*sine, cosine+y*y*one, y*z*one-x*sine, 0,
-            z*x*one-y*sine, z*y*one+x*sine, cosine+z*z*one, 0, 0, 0, 0, 1]
+    return [
+        cosine + x * x * one,
+        x * y * one - z * sine,
+        x * z * one + y * sine,
+        0,
+        y * x * one + z * sine,
+        cosine + y * y * one,
+        y * z * one - x * sine,
+        0,
+        z * x * one - y * sine,
+        z * y * one + x * sine,
+        cosine + z * z * one,
+        0,
+        0,
+        0,
+        0,
+        1,
+    ]
 
 
 def vector(element, name, default):
@@ -74,7 +95,9 @@ class UrdfKinematics:
             current = joint.find("parent").get("link")
         self.chain, self.names = chain, list(joint_names)
         active = [joint.get("name") for joint in chain if joint.get("type") != "fixed"]
-        if active != self.names or any(joint.get("type") not in ("fixed", "revolute") for joint in chain):
+        if active != self.names or any(
+            joint.get("type") not in ("fixed", "revolute") for joint in chain
+        ):
             raise ValueError("unsupported chain or mismatched joint order")
 
     @property
@@ -107,20 +130,26 @@ class UrdfKinematics:
             if origin is not None:
                 xyz = vector(origin, "xyz", "0 0 0")
                 roll, pitch, yaw = vector(origin, "rpy", "0 0 0")
-                offset = multiply(multiply(rotation([0, 0, 1], yaw), rotation([0, 1, 0], pitch)),
-                                  rotation([1, 0, 0], roll))
+                offset = multiply(
+                    multiply(rotation([0, 0, 1], yaw), rotation([0, 1, 0], pitch)),
+                    rotation([1, 0, 0], roll),
+                )
                 offset[3], offset[7], offset[11] = xyz
             pose = multiply(pose, offset)
             if joint.get("type") == "revolute":
                 angle = angles[joint.get("name")]
                 limit = joint.find("limit")
-                if limit is None or (check_limits and
-                                     not float(limit.get("lower")) <= angle <= float(limit.get("upper"))):
+                if limit is None or (
+                    check_limits
+                    and not float(limit.get("lower")) <= angle <= float(limit.get("upper"))
+                ):
                     raise ValueError("URDF joint limit exceeded")
                 axis = joint.find("axis")
                 axis = vector(axis, "xyz", "1 0 0") if axis is not None else [1, 0, 0]
                 length = math.sqrt(sum(value * value for value in axis))
-                world = [sum(pose[row * 4 + k] * axis[k] for k in range(3)) / length for row in range(3)]
+                world = [
+                    sum(pose[row * 4 + k] * axis[k] for k in range(3)) / length for row in range(3)
+                ]
                 joints.append(([pose[3], pose[7], pose[11]], world))
                 pose = multiply(pose, rotation(axis, angle))
         return pose, joints

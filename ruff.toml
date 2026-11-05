@@ -1,0 +1,9 @@
+# Python formatting and naming checks for docs/coding_standards.md.
+line-length = 100
+
+[lint]
+select = ["E501", "W", "N"]
+
+[lint.per-file-ignores]
+# Stands in for the vendor package, so it keeps the vendor's module name.
+"tests/fake_sdk/pyAgxArm/__init__.py" = ["N999"]

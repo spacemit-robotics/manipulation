@@ -2,7 +2,8 @@
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
 """SO101 servo setup with torque released: register status, parameter configuration, mid-position
-(homing offset) calibration, travel capture and servo limits, or all of them in order. Never enables torque.
+(homing offset) calibration, travel capture and servo limits, or all of them in order. Never enables
+torque.
 
 The calibration files live in SITE/so101/, beside the SO101 device configuration that
 `manipulation configure so101` creates there, under the names its templates use.
@@ -10,6 +11,7 @@ The calibration files live in SITE/so101/, beside the SO101 device configuration
 Only configure, center and limits write servo EEPROM: the motor driver unlocks and relocks it around
 each value, which is then read back; values already equal are not written.
 """
+
 import argparse
 import ctypes
 import json
@@ -33,12 +35,21 @@ class RegisterBus:
 
     def __init__(self, library, port, motor_ids):
         self.library = ctypes.CDLL(str(library), use_errno=True)
-        self.library.feetech_bus_open.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
+        self.library.feetech_bus_open.argtypes = [
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t,
+        ]
         self.library.feetech_bus_open.restype = ctypes.c_void_p
         self.library.feetech_bus_close.argtypes = [ctypes.c_void_p]
         self.library.feetech_bus_close.restype = None
-        self.library.feetech_bus_read.argtypes = [ctypes.c_void_p, ctypes.c_uint8, ctypes.c_uint8,
-                                                ctypes.POINTER(ctypes.c_uint8), ctypes.c_size_t]
+        self.library.feetech_bus_read.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint8,
+            ctypes.c_uint8,
+            ctypes.POINTER(ctypes.c_uint8),
+            ctypes.c_size_t,
+        ]
         self.library.feetech_bus_read.restype = ctypes.c_int
         self.library.feetech_bus_write.argtypes = self.library.feetech_bus_read.argtypes
         self.library.feetech_bus_write.restype = ctypes.c_int
@@ -62,7 +73,10 @@ class RegisterBus:
         data = (ctypes.c_uint8 * length)(*value.to_bytes(length, "little"))
         if self.library.feetech_bus_write(self.handle, motor_id, address, data, length) != 0:
             error = ctypes.get_errno()
-            raise OSError(error, f"servo {motor_id} register {address} write not confirmed: {os.strerror(error)}")
+            raise OSError(
+                error,
+                f"servo {motor_id} register {address} write not confirmed: {os.strerror(error)}",
+            )
 
     def close(self):
         if self.handle:
@@ -78,15 +92,17 @@ def library_path(explicit=None):
         manifest = directory / ".spacemit-manipulation.json"
         if manifest.is_file():
             layout = json.loads(manifest.read_text(encoding="utf-8"))
-            return (directory / layout["libdir"] / "libmanipulation_feetech_bus.so").resolve(strict=True)
+            return (directory / layout["libdir"] / "libmanipulation_feetech_bus.so").resolve(
+                strict=True
+            )
     raise ValueError("use the installed so101-calibrate command, or pass --library LIBRARY")
 
 
 def decode_offset(value):
     """Homing offset register: sign-magnitude, sign in bit 11."""
-    if value & ~0x0fff:
+    if value & ~0x0FFF:
         raise ValueError("invalid homing offset")
-    return -(value & 0x07ff) if value & 0x0800 else value
+    return -(value & 0x07FF) if value & 0x0800 else value
 
 
 def encode_offset(value):
@@ -130,8 +146,11 @@ def write_eeprom(bus, motor_id, values):
     Torque must already be off and stays off. Returns the entries written.
     """
     check_servos(bus, [motor_id], position_mode=False)
-    changes = [(address, length, value) for address, length, value in values
-               if bus.read(motor_id, address, length) != value]
+    changes = [
+        (address, length, value)
+        for address, length, value in values
+        if bus.read(motor_id, address, length) != value
+    ]
     for address, length, value in changes:
         bus.write(motor_id, address, length, value)
     return changes
@@ -148,13 +167,29 @@ def status(bus, motor_ids):
 
         load = word(60)
         result[motor_id] = {
-            "model": word(3), "firmware": f"{data[0]}.{data[1]}", "mode": data[33], "torque_enabled": data[40],
-            "eeprom_locked": data[LOCK], "homing_offset": decode_offset(word(31)),
-            "range_min": word(9), "range_max": word(11), "p": data[21], "d": data[22], "i": data[23],
-            "return_delay": data[7], "max_torque": word(16), "protection_current_ma": word(28),
-            "overload_torque": data[36], "acceleration": data[41], "position": word(56),
-            "load": -(load & 0x3ff) if load & 0x400 else load, "voltage_v": data[62] / 10,
-            "temperature_c": data[63], "error": data[65], "moving": data[66]}
+            "model": word(3),
+            "firmware": f"{data[0]}.{data[1]}",
+            "mode": data[33],
+            "torque_enabled": data[40],
+            "eeprom_locked": data[LOCK],
+            "homing_offset": decode_offset(word(31)),
+            "range_min": word(9),
+            "range_max": word(11),
+            "p": data[21],
+            "d": data[22],
+            "i": data[23],
+            "return_delay": data[7],
+            "max_torque": word(16),
+            "protection_current_ma": word(28),
+            "overload_torque": data[36],
+            "acceleration": data[41],
+            "position": word(56),
+            "load": -(load & 0x3FF) if load & 0x400 else load,
+            "voltage_v": data[62] / 10,
+            "temperature_c": data[63],
+            "error": data[65],
+            "moving": data[66],
+        }
     return result
 
 
@@ -162,8 +197,12 @@ def configure(bus, arm_ids, gripper_id):
     """Recommended EEPROM parameters; returns {motor_id: [(address, length, value) written]}."""
     ids = list(arm_ids) + ([gripper_id] if gripper_id is not None else [])
     check_servos(bus, ids, position_mode=False)  # Mode is one of the parameters.
-    return {motor_id: write_eeprom(bus, motor_id, GRIPPER_PARAMETERS if motor_id == gripper_id
-                                   else ARM_PARAMETERS) for motor_id in ids}
+    return {
+        motor_id: write_eeprom(
+            bus, motor_id, GRIPPER_PARAMETERS if motor_id == gripper_id else ARM_PARAMETERS
+        )
+        for motor_id in ids
+    }
 
 
 def center(bus, motor_ids, prompt=input, settle_s=0.1):
@@ -173,8 +212,11 @@ def center(bus, motor_ids, prompt=input, settle_s=0.1):
     travel afterwards. Returns {motor_id: homing_offset}.
     """
     check_servos(bus, motor_ids)
-    prompt("Support the arm and hold it in the model zero pose, every joint near the middle of its travel."
-           " Press Enter to calibrate, Ctrl+C to cancel: ")
+    prompt(
+        "Support the arm and hold it in the model zero pose, every joint near the middle of its"
+        " travel."
+        " Press Enter to calibrate, Ctrl+C to cancel: "
+    )
     check_servos(bus, motor_ids)
     offsets = {}
     for motor_id in motor_ids:
@@ -182,33 +224,50 @@ def center(bus, motor_ids, prompt=input, settle_s=0.1):
         time.sleep(settle_s)
         value = stationary(bus, motor_id) - MIDDLE
         if not -2047 <= value <= 2047:
-            raise ValueError(f"servo {motor_id}: at the encoder end; move it towards the middle of its travel")
+            raise ValueError(
+                f"servo {motor_id}: at the encoder end; move it towards the middle of its travel"
+            )
         write_eeprom(bus, motor_id, ((31, 2, encode_offset(value)),))
         time.sleep(settle_s)
         if abs(stationary(bus, motor_id) - MIDDLE) > 3:
-            raise ValueError(f"servo {motor_id}: position after calibration is not the middle; keep the arm still")
+            raise ValueError(
+                f"servo {motor_id}: position after calibration is not the middle; "
+                "keep the arm still"
+            )
         offsets[motor_id] = value
     return offsets
 
 
 def limits(bus, arm, gripper):
-    """Install captured travel as the servo position limits (registers 9/11), in the captured offset frame."""
-    ranges = [(joint["id"], joint["homing_offset"], joint["range_min"], joint["range_max"])
-              for joint in (arm or {}).values()]
+    """Install captured travel as the servo position limits (registers 9/11), in the captured offset
+    frame."""
+    ranges = [
+        (joint["id"], joint["homing_offset"], joint["range_min"], joint["range_max"])
+        for joint in (arm or {}).values()
+    ]
     if gripper:
-        ranges.append((gripper["motor_id"], gripper.get("homing_offset"),
-                       min(gripper["open_ticks"], gripper["closed_ticks"]),
-                       max(gripper["open_ticks"], gripper["closed_ticks"])))
+        ranges.append(
+            (
+                gripper["motor_id"],
+                gripper.get("homing_offset"),
+                min(gripper["open_ticks"], gripper["closed_ticks"]),
+                max(gripper["open_ticks"], gripper["closed_ticks"]),
+            )
+        )
     check_servos(bus, [motor_id for motor_id, *_ in ranges])
     for motor_id, homing, minimum, maximum in ranges:
         if not 0 <= minimum < maximum <= 4095:
             raise ValueError(f"servo {motor_id}: invalid captured range")
         if homing is not None and offset(bus, motor_id) != homing:
-            raise ValueError(f"servo {motor_id}: homing offset differs from the calibration; capture again")
+            raise ValueError(
+                f"servo {motor_id}: homing offset differs from the calibration; capture again"
+            )
         if not minimum <= stationary(bus, motor_id) <= maximum:
             raise ValueError(f"servo {motor_id}: move it into its captured range first")
-    return {motor_id: write_eeprom(bus, motor_id, ((9, 2, minimum), (11, 2, maximum)))
-            for motor_id, _, minimum, maximum in ranges}
+    return {
+        motor_id: write_eeprom(bus, motor_id, ((9, 2, minimum), (11, 2, maximum)))
+        for motor_id, _, minimum, maximum in ranges
+    }
 
 
 def calibrate_all(bus, arm_ids, gripper_id, save, prompt=input, settle_s=0.1):
@@ -246,16 +305,28 @@ def capture(bus, arm_ids, gripper_id, prompt=input):
         second = sample(motor_id, f"Support the arm; move {name} to the opposite safe endpoint.")
         if abs(first - second) < 32:
             raise ValueError(f"{name}: travel is too small (minimum 32 encoder ticks)")
-        arm[name] = {"id": motor_id, "homing_offset": offsets[motor_id],
-                     "range_min": min(first, second), "range_max": max(first, second)}
+        arm[name] = {
+            "id": motor_id,
+            "homing_offset": offsets[motor_id],
+            "range_min": min(first, second),
+            "range_max": max(first, second),
+        }
     gripper = None
     if gripper_id is not None:
-        opened = sample(gripper_id, "Move the empty gripper to its open endpoint without forcing it.")
-        closed = sample(gripper_id, "Move the empty gripper to its closed endpoint without forcing it.")
+        opened = sample(
+            gripper_id, "Move the empty gripper to its open endpoint without forcing it."
+        )
+        closed = sample(
+            gripper_id, "Move the empty gripper to its closed endpoint without forcing it."
+        )
         if abs(opened - closed) < 100:
             raise ValueError("gripper travel is too small (minimum 100 encoder ticks)")
-        gripper = {"motor_id": gripper_id, "open_ticks": opened, "closed_ticks": closed,
-                   "homing_offset": offsets[gripper_id]}
+        gripper = {
+            "motor_id": gripper_id,
+            "open_ticks": opened,
+            "closed_ticks": closed,
+            "homing_offset": offsets[gripper_id],
+        }
     check_servos(bus, ids, offsets)
     return arm, gripper
 
@@ -280,27 +351,49 @@ def default_site():
 
 def load_calibration(path):
     if not path.is_file():
-        raise FileNotFoundError(f"{path} not found; run `so101-calibrate capture` first, or choose --part")
+        raise FileNotFoundError(
+            f"{path} not found; run `so101-calibrate capture` first, or choose --part"
+        )
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("operation", choices=("all", "status", "configure", "center", "capture", "limits"),
-                        help="all runs configure, center, capture and limits in order; status reads registers; "
-                             "configure writes recommended parameters; center sets the homing offsets; capture "
-                             "records travel to new calibration files; limits installs the captured travel as "
-                             "servo limits")
-    parser.add_argument("--port", required=True, help="SO101 serial device, preferably /dev/serial/by-id/...")
-    parser.add_argument("--site", default=default_site(),
-                        help="site directory; the calibration files are in its so101/ subdirectory "
-                             "(default: $MANIPULATION_SITE or ~/.local/share/spacemit-manipulation/site)")
-    parser.add_argument("--part", choices=("all", "arm", "gripper"), default="all",
-                        help="servos to use (default all)")
-    parser.add_argument("--arm-calibration", default=ARM_FILE,
-                        help=f"arm calibration file, relative to SITE/so101 (default {ARM_FILE})")
-    parser.add_argument("--gripper-calibration", default=GRIPPER_FILE,
-                        help=f"gripper calibration file, relative to SITE/so101 (default {GRIPPER_FILE})")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "operation",
+        choices=("all", "status", "configure", "center", "capture", "limits"),
+        help="all runs configure, center, capture and limits in order; status reads registers; "
+        "configure writes recommended parameters; center sets the homing offsets; capture "
+        "records travel to new calibration files; limits installs the captured travel as "
+        "servo limits",
+    )
+    parser.add_argument(
+        "--port", required=True, help="SO101 serial device, preferably /dev/serial/by-id/..."
+    )
+    parser.add_argument(
+        "--site",
+        default=default_site(),
+        help="site directory; the calibration files are in its so101/ subdirectory "
+        "(default: $MANIPULATION_SITE or ~/.local/share/spacemit-manipulation/site)",
+    )
+    parser.add_argument(
+        "--part",
+        choices=("all", "arm", "gripper"),
+        default="all",
+        help="servos to use (default all)",
+    )
+    parser.add_argument(
+        "--arm-calibration",
+        default=ARM_FILE,
+        help=f"arm calibration file, relative to SITE/so101 (default {ARM_FILE})",
+    )
+    parser.add_argument(
+        "--gripper-calibration",
+        default=GRIPPER_FILE,
+        help=f"gripper calibration file, relative to SITE/so101 (default {GRIPPER_FILE})",
+    )
     parser.add_argument("--arm-ids", default="1,2,3,4,5")
     parser.add_argument("--gripper-id", type=int, default=6)
     parser.add_argument("--library", help="explicit libmanipulation_feetech_bus.so path")
@@ -322,21 +415,31 @@ def main():
                 raise ValueError("arm and gripper calibration files must differ")
             for part in parts:
                 if os.path.lexists(files[part]):
-                    raise FileExistsError(f"existing calibration kept: {files[part]}; move it aside to capture again")
+                    raise FileExistsError(
+                        f"existing calibration kept: {files[part]}; move it aside to capture again"
+                    )
         arm_ids = arm_ids if "arm" in parts else []
         gripper_id = args.gripper_id if "gripper" in parts else None
     ids = arm_ids + ([gripper_id] if gripper_id is not None else [])
     if len(set(ids)) != len(ids) or any(not 1 <= value <= 253 for value in ids):
         raise ValueError("servo IDs must be distinct integers in 1..253")
     if args.operation == "capture":
-        print("Travel capture preserves the current homing offsets: run `so101-calibrate center` first on a new\n"
-              "or reassembled arm. Support the arm, remove loads, and release torque using the device\n"
-              "procedure before starting. This operation only reads servo registers.")
+        print(
+            "Travel capture preserves the current homing offsets: run `so101-calibrate center`\n"
+            "first on a new or reassembled arm. Support the arm, remove loads, and release torque\n"
+            "using the device procedure before starting. This operation only reads servo registers."
+        )
     elif args.operation == "all":
-        print("Full setup: parameters, mid position, travel and servo limits. Support the arm, remove loads,\n"
-              "and release torque before starting; this tool never enables torque.")
+        print(
+            "Full setup: parameters, mid position, travel and servo limits. Support the arm,\n"
+            "remove loads, and release torque before starting; this tool never enables torque."
+        )
     elif args.operation != "status":
-        print("Torque must already be released with the arm supported; this tool never enables torque.")
+        print(
+            "Torque must already be released with the arm supported; "
+            "this tool never enables torque."
+        )
+
     def save(arm, gripper):
         if arm_ids:
             save_new(files["arm"], arm)
@@ -355,12 +458,20 @@ def main():
                 print(json.dumps(dict(id=motor_id, **values)))
         elif args.operation == "configure":
             for motor_id, written in configure(bus, arm_ids, gripper_id).items():
-                print(f"servo {motor_id}: " + (", ".join(f"register {address} = {value}"
-                                                         for address, _, value in written) or "unchanged"))
+                print(
+                    f"servo {motor_id}: "
+                    + (
+                        ", ".join(f"register {address} = {value}" for address, _, value in written)
+                        or "unchanged"
+                    )
+                )
         elif args.operation == "center":
             for motor_id, value in center(bus, ids).items():
                 print(f"servo {motor_id}: homing offset {value}, limits 0..4095")
-            print("Existing calibration files no longer match: move them aside and capture travel again.")
+            print(
+                "Existing calibration files no longer match: "
+                "move them aside and capture travel again."
+            )
         else:
             for motor_id, written in limits(bus, arm, gripper).items():
                 print(f"servo {motor_id}: " + ("limits written" if written else "limits unchanged"))

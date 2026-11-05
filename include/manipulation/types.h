@@ -18,7 +18,16 @@ using DriverOptions = std::map<std::string, std::string>;
 
 // kUnverified: command delivered and its execution time elapsed, but completion was not measured
 // (end effector configured without position feedback). It is neither success nor failure.
-enum class Result { kIdle, kRunning, kSucceeded, kCancelled, kTimedOut, kFault, kStopUnknown, kUnverified };
+enum class Result {
+    kIdle,
+    kRunning,
+    kSucceeded,
+    kCancelled,
+    kTimedOut,
+    kFault,
+    kStopUnknown,
+    kUnverified
+};
 
 struct JointLimit {
     std::string name;
