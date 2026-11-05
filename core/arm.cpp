@@ -287,9 +287,14 @@ void ArmSession::CheckTarget(const std::vector<double>& target_rad, double speed
           "speed_scale must be in (0, 1]");
     Check(speed_scale >= capabilities.minimum_speed_scale, "speed_scale below driver minimum");
     for (std::size_t i = 0; i < target_rad.size(); ++i) {
-        Check(std::isfinite(target_rad[i]) && target_rad[i] >= p.config.joints[i].minimum_rad &&
-                      target_rad[i] <= p.config.joints[i].maximum_rad,
-              "target outside joint limits");
+        const auto& joint = p.config.joints[i];
+        if (!std::isfinite(target_rad[i]) || target_rad[i] < joint.minimum_rad ||
+            target_rad[i] > joint.maximum_rad) {
+            throw std::runtime_error("target outside joint limits: " + joint.name + " " +
+                                     std::to_string(target_rad[i]) + " rad, allowed " +
+                                     std::to_string(joint.minimum_rad) + ".." +
+                                     std::to_string(joint.maximum_rad) + " rad");
+        }
     }
 }
 

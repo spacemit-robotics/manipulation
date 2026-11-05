@@ -240,6 +240,30 @@ class So101Tests(unittest.TestCase):
                 client.move_arm([1] * 5, 0.1)
         self.assertEqual(self.bus.writes, [])
 
+    def test_enable_outside_the_travel_names_every_joint_without_writes(self):
+        for motor_id in range(1, 7):
+            self.bus.registers[motor_id][40] = 0
+        self.arm_calibration["shoulder_lift"].update(range_min=2100, range_max=3800)
+        self.arm_calibration["elbow_flex"].update(range_min=300, range_max=2000)
+        self.save()
+        with self.client() as client:
+            with self.assertRaises(DeviceCommandError) as raised:
+                client.enable_arm()
+        message = str(raised.exception)
+        self.assertIn("shoulder_lift at", message)
+        self.assertIn("elbow_flex at", message)
+        self.assertNotIn("shoulder_pan", message)
+        self.assertFalse(any(address == 40 for _, address, _ in self.bus.writes))
+
+    def test_gripper_move_with_the_arm_released_says_to_enable_the_arm(self):
+        self.gripper()
+        for motor_id in range(1, 6):
+            self.bus.registers[motor_id][40] = 0
+        with self.client() as client:
+            with self.assertRaisesRegex(DeviceCommandError, "arm is not enabled"):
+                client.move_effector([1.0], 0.5)
+        self.assertEqual(self.bus.writes, [])
+
     def test_enable_requires_goal_readback_before_any_torque_write(self):
         self.gripper()
         for motor_id in range(1, 7):

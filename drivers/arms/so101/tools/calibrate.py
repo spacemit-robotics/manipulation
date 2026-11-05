@@ -13,15 +13,23 @@ each value, which is then read back; values already equal are not written.
 """
 
 import argparse
+import contextlib
 import ctypes
 import json
 import os
 from pathlib import Path
+import select
 import sys
+import termios
+import time
 import time
 
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
 MIDDLE = 2047  # Encoder ticks of the model zero pose (0 rad) after center.
+# Turns past half a turn, so a captured travel could wrap around the encoder: it keeps the whole
+# circle, as in LeRobot, and the configured joint limits bound it.
+FULL_TURN = "wrist_roll"
+SWEEP_PERIOD_S = 0.02  # Pause between two readings of the live travel table.
 ARM_FILE, GRIPPER_FILE = "so101_calibration.json", "so101_gripper_calibration.json"
 LOCK = 55  # Reported by status; the motor driver handles the EEPROM lock around writes.
 # (address, length, value) recommended for the SO101 (LeRobot's values):
@@ -131,6 +139,95 @@ def check_servos(bus, motor_ids, offsets=None, position_mode=True):
             raise ValueError(f"servo {motor_id}: position mode required")
         if offsets is not None and offset(bus, motor_id) != offsets[motor_id]:
             raise ValueError(f"servo {motor_id}: homing offset changed during capture")
+
+
+def present(bus, motor_id):
+    value = bus.read(motor_id, 56, 2)
+    if not 0 <= value <= 4095:
+        raise ValueError(f"servo {motor_id}: invalid position {value}")
+    return value
+
+
+def enter_pressed():
+    """True once the operator has pressed Enter; never blocks, as LeRobot's."""
+    if select.select([sys.stdin], [], [], 0)[0]:
+        sys.stdin.readline()
+        return True
+    return False
+
+
+@contextlib.contextmanager
+def unechoed_input():
+    """Keep the terminal from echoing keys while the live table is drawn: an echoed Enter would
+    move the cursor and leave a stray table line behind."""
+    if not sys.stdin.isatty():
+        yield
+        return
+    descriptor = sys.stdin.fileno()
+    saved = termios.tcgetattr(descriptor)
+    quiet = termios.tcgetattr(descriptor)
+    quiet[3] &= ~termios.ECHO
+    termios.tcsetattr(descriptor, termios.TCSANOW, quiet)
+    try:
+        yield
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSANOW, saved)
+
+
+def travel_table(names, minimums, positions, maximums):
+    """The LeRobot range-of-motion table: lowest, current and highest reading per joint."""
+    lines = ["", "-" * 43, f"{'NAME':<15} | {'MIN':>6} | {'POS':>6} | {'MAX':>6}"]
+    lines += [
+        f"{name:<15} | {minimums[name]:>6} | {positions[name]:>6} | {maximums[name]:>6}"
+        for name in names
+    ]
+    return "\n".join(lines) + "\n"
+
+
+class LiveTable:
+    """Redraws the travel table in place on a terminal; elsewhere prints only the final table."""
+
+    def __init__(self, stream=None):
+        self.stream, self.drawn = stream or sys.stdout, 0
+
+    def __call__(self, text, final=False):
+        if not self.stream.isatty():
+            if final:
+                self.stream.write(text)
+            return
+        if final:  # Already on screen; Enter moved the cursor below it.
+            return
+        if self.drawn:
+            self.stream.write(f"\033[{self.drawn}A")
+        self.stream.write(text)
+        self.stream.flush()
+        self.drawn = text.count("\n")
+
+
+def sweep(bus, joints, enter_pressed=enter_pressed, show=None, period_s=SWEEP_PERIOD_S):
+    """Record each joint's lowest and highest position, from the current pose, until Enter.
+
+    joints maps names to servo IDs. A live table shows MIN, POS and MAX per joint. Returns the
+    minimums, the maximums and the joints whose reading jumped by more than half the encoder
+    between two samples: it wrapped around the encoder.
+    """
+    show = show or LiveTable()
+    previous = {name: present(bus, motor_id) for name, motor_id in joints.items()}
+    minimums, maximums, wrapped = dict(previous), dict(previous), set()
+    while True:
+        positions = {name: present(bus, motor_id) for name, motor_id in joints.items()}
+        for name, value in positions.items():
+            if abs(value - previous[name]) > 2048:
+                wrapped.add(name)
+            minimums[name] = min(minimums[name], value)
+            maximums[name] = max(maximums[name], value)
+        previous = positions
+        show(travel_table(joints, minimums, positions, maximums))
+        if enter_pressed():
+            break
+        time.sleep(period_s)
+    show(travel_table(joints, minimums, positions, maximums), final=True)
+    return minimums, maximums, wrapped
 
 
 def stationary(bus, motor_id):
@@ -270,7 +367,17 @@ def limits(bus, arm, gripper):
     }
 
 
-def calibrate_all(bus, arm_ids, gripper_id, save, prompt=input, settle_s=0.1):
+def calibrate_all(
+    bus,
+    arm_ids,
+    gripper_id,
+    save,
+    prompt=input,
+    settle_s=0.1,
+    enter_pressed=enter_pressed,
+    show=None,
+    period_s=SWEEP_PERIOD_S,
+):
     """configure, center, capture and limits in order: the full setup of a new or reassembled arm.
 
     save(arm, gripper) stores the captured travel before it is written as servo limits.
@@ -278,39 +385,92 @@ def calibrate_all(bus, arm_ids, gripper_id, save, prompt=input, settle_s=0.1):
     ids = list(arm_ids) + ([gripper_id] if gripper_id is not None else [])
     configure(bus, arm_ids, gripper_id)
     center(bus, ids, prompt, settle_s)
-    arm, gripper = capture(bus, arm_ids, gripper_id, prompt)
+    arm, gripper = capture(bus, arm_ids, gripper_id, prompt, enter_pressed, show, period_s)
     save(arm, gripper)
     limits(bus, arm, gripper)
     return arm, gripper
 
 
-def capture(bus, arm_ids, gripper_id, prompt=input):
-    """Capture two operator-selected endpoints per channel; leave servo configuration unchanged."""
+def capture(
+    bus,
+    arm_ids,
+    gripper_id,
+    prompt=input,
+    enter_pressed=enter_pressed,
+    show=None,
+    period_s=SWEEP_PERIOD_S,
+):
+    """Capture the travel of the joints and the gripper endpoints; servo settings stay unchanged.
+
+    As in LeRobot, the joints except wrist_roll are moved through their whole travel while a live
+    table shows MIN, POS and MAX; each travel must include the middle (the model zero pose that
+    center sets). wrist_roll turns fully and keeps the whole circle.
+    """
     ids = list(arm_ids) + ([gripper_id] if gripper_id is not None else [])
     check_servos(bus, ids)
     offsets = {motor_id: offset(bus, motor_id) for motor_id in ids}
 
+    def hardware_limits(motor_id):
+        minimum, maximum = bus.read(motor_id, 9, 2), bus.read(motor_id, 11, 2)
+        if not 0 <= minimum < maximum <= 4095:
+            raise ValueError(f"servo {motor_id}: invalid hardware limits {minimum}..{maximum}")
+        return minimum, maximum
+
     def sample(motor_id, message):
         prompt(message + " Press Enter to capture, Ctrl+C to cancel: ")
         check_servos(bus, ids, offsets)
-        second = stationary(bus, motor_id)
-        minimum, maximum = bus.read(motor_id, 9, 2), bus.read(motor_id, 11, 2)
-        if not 0 <= minimum < maximum <= 4095 or not minimum <= second <= maximum:
+        value = stationary(bus, motor_id)
+        minimum, maximum = hardware_limits(motor_id)
+        if not minimum <= value <= maximum:
             raise ValueError(f"servo {motor_id}: position outside configured hardware limits")
-        return second
+        return value
 
+    joints = {name: motor_id for name, motor_id in zip(JOINTS, arm_ids) if name != FULL_TURN}
     arm = {}
+    if joints:
+        print(
+            f"Support the arm and move {', '.join(joints)} one at a time, slowly, through the "
+            f"whole travel to both ends.\n{FULL_TURN} turns fully and is not recorded. Press "
+            "Enter when every joint has been moved, Ctrl+C to cancel."
+        )
+        with unechoed_input():
+            minimums, maximums, wrapped = sweep(bus, joints, enter_pressed, show, period_s)
+        check_servos(bus, ids, offsets)
+        problems = []
+        for name, motor_id in joints.items():
+            low, high = minimums[name], maximums[name]
+            minimum, maximum = hardware_limits(motor_id)
+            if name in wrapped:
+                problems.append(f"{name}: the reading wrapped around the encoder")
+            elif low < minimum or high > maximum:
+                problems.append(f"{name}: position outside configured hardware limits")
+            elif high - low < 32:
+                problems.append(f"{name}: travel {low}..{high} is too small (minimum 32 ticks)")
+            elif not low <= MIDDLE <= high:
+                problems.append(
+                    f"{name}: travel {low}..{high} does not include the middle {MIDDLE}"
+                )
+        if problems:
+            raise ValueError(
+                "; ".join(problems) + ". Move each joint through its whole travel and capture "
+                "again; run `so101-calibrate center` first if the middle is missing"
+            )
+        for name, motor_id in joints.items():
+            arm[name] = {
+                "id": motor_id,
+                "homing_offset": offsets[motor_id],
+                "range_min": minimums[name],
+                "range_max": maximums[name],
+            }
     for name, motor_id in zip(JOINTS, arm_ids):
-        first = sample(motor_id, f"Support the arm; move {name} to one safe travel endpoint.")
-        second = sample(motor_id, f"Support the arm; move {name} to the opposite safe endpoint.")
-        if abs(first - second) < 32:
-            raise ValueError(f"{name}: travel is too small (minimum 32 encoder ticks)")
-        arm[name] = {
-            "id": motor_id,
-            "homing_offset": offsets[motor_id],
-            "range_min": min(first, second),
-            "range_max": max(first, second),
-        }
+        if name == FULL_TURN:
+            arm[name] = {
+                "id": motor_id,
+                "homing_offset": offsets[motor_id],
+                "range_min": 0,
+                "range_max": 4095,
+            }
+    arm = {name: arm[name] for name in JOINTS if name in arm}
     gripper = None
     if gripper_id is not None:
         opened = sample(

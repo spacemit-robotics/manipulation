@@ -18,6 +18,15 @@ void Check(bool condition, const char* detail) {
     if (!condition) throw std::runtime_error(detail);
 }
 
+// The end effector moves only while the arm holds its position under torque.
+void CheckArmHolds(const ArmState& arm, bool settling) {
+    Check(!arm.fault, "arm faulted; tool motion refused");
+    Check(arm.enabled, "arm is not enabled; enable the arm before moving the end effector");
+    Check(arm.position_mode, "arm is not in position mode; tool motion refused");
+    Check(!arm.moving || settling,
+          "arm is moving; wait until it stops before moving the end effector");
+}
+
 bool Failed(Result status) {
     return status == Result::kFault || status == Result::kTimedOut ||
            status == Result::kStopUnknown;
@@ -336,7 +345,7 @@ CommandResult DeviceSession::FollowEffector(const EffectorPoint& point) {
     auto& p = *impl_;
     CheckEffectorPoint(point);
     const auto arm = ReadArm();
-    Check(!arm.fault && arm.enabled && arm.position_mode, "arm not ready for tool motion");
+    CheckArmHolds(arm, true);
     const auto before = ReadEffector();
     Check(!before.fault, "effector faulted");
     Check(!before.enabled.has_value() || *before.enabled, "effector disabled");
@@ -491,8 +500,7 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
     // converging to that command's target during the tool motion, as the original executor allowed;
     // any other motion of more than kToolArmDrift (the original hand start tolerance) is a fault:
     // a still arm must stay where it was, a settling one must not get farther from its target.
-    Check(!arm.fault && arm.enabled && arm.position_mode && (!arm.moving || p.arm->Settling()),
-          "arm not ready for tool motion");
+    CheckArmHolds(arm, p.arm->Settling());
     const auto reference = p.arm->Settling() ? p.arm->LastTarget() : arm.joints_rad;
     const auto distance = [&reference](const std::vector<double>& joints) {
         double value = 0;

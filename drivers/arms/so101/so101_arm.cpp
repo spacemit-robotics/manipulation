@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
+#include <string>
 #include <thread>
 
 namespace spacemit::manipulation::so101 {
@@ -92,9 +94,16 @@ public:
         const auto state = Read();
         CheckMode(state);
         std::vector<int> ticks;
+        std::string outside;
         for (size_t i = 0; i < kArmJoints; ++i) {
-            CheckPosition(i, state.joints_rad[i], samples_[i].position);
+            const auto joint = OutsideLimits(i, state.joints_rad[i], samples_[i].position);
+            if (!joint.empty()) outside += (outside.empty() ? "" : "; ") + joint;
             ticks.push_back(samples_[i].position);
+        }
+        if (!outside.empty()) {
+            throw CommandRejected("SO101 joints outside their limits: " + outside +
+                                  ". With torque released, move them inside by hand, or capture "
+                                  "the travel again");
         }
         if (state.enabled) return;
         // Set current positions before torque, preventing a retained old target from restarting.
@@ -136,7 +145,8 @@ public:
         std::vector<int> ticks;
         for (size_t i = 0; i < kArmJoints; ++i) {
             const int target = JointTicks(point.target_rad[i]);
-            CheckPosition(i, point.target_rad[i], target);
+            const auto outside = OutsideLimits(i, point.target_rad[i], target);
+            if (!outside.empty()) throw CommandRejected("SO101 target outside limits: " + outside);
             ticks.push_back(target);
         }
         const auto state = Read();
@@ -186,14 +196,25 @@ private:
         }
     }
 
-    void CheckPosition(size_t index, double radians, int ticks) const {
+    // Empty when the position is within both the configured limits and the calibrated travel;
+    // otherwise the joint, its position and the allowed range, in degrees.
+    std::string OutsideLimits(size_t index, double radians, int ticks) const {
         const auto& limit = definition_.joints[index];
         const auto& calibration = session_->Config().calibration[index];
-        if (!std::isfinite(radians) || radians < limit.minimum_rad || radians > limit.maximum_rad ||
-            ticks < calibration.minimum || ticks > calibration.maximum) {
-            throw CommandRejected("SO101 target is outside configured/calibrated limits: " +
-                                  limit.name);
+        if (std::isfinite(radians) && radians >= limit.minimum_rad &&
+            radians <= limit.maximum_rad && ticks >= calibration.minimum &&
+            ticks <= calibration.maximum) {
+            return "";
         }
+        constexpr double kDegree = 180 / 3.14159265358979323846;
+        const double low = std::max(limit.minimum_rad, JointPosition(calibration.minimum));
+        const double high = std::min(limit.maximum_rad, JointPosition(calibration.maximum));
+        std::ostringstream text;
+        text.setf(std::ios::fixed);
+        text.precision(1);
+        text << limit.name << " at " << radians * kDegree << " deg, allowed " << low * kDegree
+             << ".." << high * kDegree << " deg";
+        return text.str();
     }
 
     std::vector<uint8_t> Ids() const {
