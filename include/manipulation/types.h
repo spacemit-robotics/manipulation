@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Value types shared by device contracts, drivers and configuration. Units: rad, s.
-#ifndef TYPES_H
-#define TYPES_H
+#ifndef MANIPULATION_TYPES_H_
+#define MANIPULATION_TYPES_H_
 
 #include <chrono>
 #include <cstdint>
@@ -57,4 +57,4 @@ const char* ResultName(Result result);
 const char* DefaultLockDirectory();
 
 }  // namespace spacemit::manipulation
-#endif  // TYPES_H
+#endif  // MANIPULATION_TYPES_H_

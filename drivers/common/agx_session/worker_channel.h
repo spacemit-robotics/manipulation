@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Private bounded local worker protocol; never exported to applications.
-#ifndef WORKER_CHANNEL_H
-#define WORKER_CHANNEL_H
+#ifndef MANIPULATION_DRIVERS_COMMON_AGX_SESSION_WORKER_CHANNEL_H_
+#define MANIPULATION_DRIVERS_COMMON_AGX_SESSION_WORKER_CHANNEL_H_
 
 #include <sys/types.h>
 #include <yaml-cpp/yaml.h>
@@ -31,4 +31,4 @@ private:
 };
 
 }  // namespace spacemit::manipulation::agx
-#endif  // WORKER_CHANNEL_H
+#endif  // MANIPULATION_DRIVERS_COMMON_AGX_SESSION_WORKER_CHANNEL_H_

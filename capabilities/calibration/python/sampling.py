@@ -73,7 +73,7 @@ def capture_sample(port, camera, detector, window=None, discard=5, frames=3):
         poses.append(port.read())
         image = camera.capture()
         frame_joints = port.read_joints()
-        board, quality, annotated = detector.detect(image, camera.K, camera.D)
+        board, quality, annotated = detector.detect(image, camera.camera_matrix, camera.dist_coeffs)
         if window is not None:
             inside_window(quality["corner_pixels"], window)
         poses.append(port.read())

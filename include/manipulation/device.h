@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // A single owned arm with an optional independent end effector. No vendor types.
-#ifndef DEVICE_H
-#define DEVICE_H
+#ifndef MANIPULATION_DEVICE_H_
+#define MANIPULATION_DEVICE_H_
 
 #include <functional>
 #include <map>
@@ -158,4 +158,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 }  // namespace spacemit::manipulation
-#endif  // DEVICE_H
+#endif  // MANIPULATION_DEVICE_H_

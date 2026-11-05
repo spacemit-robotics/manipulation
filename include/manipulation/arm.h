@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Arm driver contract. No end-effector, vendor types or implicit home/enable.
-#ifndef ARM_H
-#define ARM_H
+#ifndef MANIPULATION_ARM_H_
+#define MANIPULATION_ARM_H_
 
 #include <string>
 #include <vector>
@@ -107,4 +107,4 @@ public:
 };
 
 }  // namespace spacemit::manipulation
-#endif  // ARM_H
+#endif  // MANIPULATION_ARM_H_

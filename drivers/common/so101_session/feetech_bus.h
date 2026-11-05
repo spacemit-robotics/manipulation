@@ -3,8 +3,8 @@
  * Explicit Feetech register transactions for the SO101 driver and so101-calibrate, through the
  * public API of the SDK motor component. Opening and closing never write servo registers.
  */
-#ifndef FEETECH_BUS_H
-#define FEETECH_BUS_H
+#ifndef MANIPULATION_DRIVERS_COMMON_SO101_SESSION_FEETECH_BUS_H_
+#define MANIPULATION_DRIVERS_COMMON_SO101_SESSION_FEETECH_BUS_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -40,4 +40,4 @@ int feetech_bus_write(struct feetech_bus *bus, uint8_t id, uint8_t address, cons
 #ifdef __cplusplus
 }
 #endif
-#endif  /* FEETECH_BUS_H */
+#endif  // MANIPULATION_DRIVERS_COMMON_SO101_SESSION_FEETECH_BUS_H_

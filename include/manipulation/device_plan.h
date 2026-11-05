@@ -1,7 +1,7 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
-#ifndef DEVICE_PLAN_H
-#define DEVICE_PLAN_H
+#ifndef MANIPULATION_DEVICE_PLAN_H_
+#define MANIPULATION_DEVICE_PLAN_H_
 #include <string>
 #include <vector>
 #include "manipulation/device.h"
@@ -22,4 +22,4 @@ DevicePlan LoadDevicePlan(const std::string& filename, const DeviceRegistry& reg
 CommandResult RunDeviceSteps(DeviceSession& session, const std::vector<DeviceStep>& steps,
     const std::function<bool()>& cancelled = {});
 }  // namespace spacemit::manipulation
-#endif  // DEVICE_PLAN_H
+#endif  // MANIPULATION_DEVICE_PLAN_H_

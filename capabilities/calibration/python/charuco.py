@@ -50,7 +50,7 @@ class CharucoDetector:
                     or not (0 <= box[0] < box[2] and 0 <= box[1] < box[3])):
                 raise ValueError("image rectangles must be integer [x0, y0, x1, y1]")
 
-    def detect(self, image, K, D):
+    def detect(self, image, camera_matrix, dist_coeffs):
         """Return (T_camera_board 4x4, quality, annotated image) or raise with the reason."""
         cv = self.cv
         source = image
@@ -70,7 +70,7 @@ class CharucoDetector:
         if len(np.unique(ids)) != len(ids):
             raise ValueError("duplicate marker ids; isolate one board with image_roi_xyxy")
         _, charuco_corners, charuco_ids = cv.aruco.interpolateCornersCharuco(
-            corners, ids, source, self.board, cameraMatrix=K, distCoeffs=D)
+            corners, ids, source, self.board, cameraMatrix=camera_matrix, distCoeffs=dist_coeffs)
         required = self.cfg.get("min_corners", 6)
         if charuco_ids is None or len(charuco_ids) < required:
             found = 0 if charuco_ids is None else len(charuco_ids)
@@ -79,13 +79,13 @@ class CharucoDetector:
         uv = np.asarray(charuco_corners, dtype=np.float64).reshape(-1, 2)
         if np.linalg.matrix_rank(obj - obj.mean(axis=0), tol=1e-7) < 2:
             raise ValueError("detected corners are collinear")
-        ok, rvec, tvec = cv.solvePnP(obj, uv, K, D, flags=cv.SOLVEPNP_ITERATIVE)
+        ok, rvec, tvec = cv.solvePnP(obj, uv, camera_matrix, dist_coeffs, flags=cv.SOLVEPNP_ITERATIVE)
         if not ok or not np.isfinite(tvec).all():
             raise ValueError("board pose solve failed")
         rotation = cv.Rodrigues(rvec)[0]
         if np.min((rotation @ obj.T + tvec)[2]) <= 0:
             raise ValueError("board behind camera")
-        projected = cv.projectPoints(obj, rvec, tvec, K, D)[0].reshape(-1, 2)
+        projected = cv.projectPoints(obj, rvec, tvec, camera_matrix, dist_coeffs)[0].reshape(-1, 2)
         rms = float(np.sqrt(np.mean(np.sum((projected - uv) ** 2, axis=1))))
         if not np.isfinite(rms) or rms > self.cfg.get("max_reprojection_px", 1.0):
             raise ValueError(f"reprojection RMS too large: {rms:.3f} px")
@@ -93,7 +93,7 @@ class CharucoDetector:
         transform[:3, :3], transform[:3, 3] = rotation, tvec.ravel()
         annotated = image.copy()
         cv.aruco.drawDetectedCornersCharuco(annotated, charuco_corners, charuco_ids)
-        cv.drawFrameAxes(annotated, K, D, rvec, tvec, self.cfg["square_length_m"] * 2)
+        cv.drawFrameAxes(annotated, camera_matrix, dist_coeffs, rvec, tvec, self.cfg["square_length_m"] * 2)
         quality = dict(corners=int(len(charuco_ids)), reprojection_rms_px=rms, corner_pixels=uv.tolist())
         return transform, quality, annotated
 
@@ -144,14 +144,14 @@ class RealSenseCamera:
             started = self.pipeline.start(config)
             self.started = True
             intrinsics = started.get_stream(rs.stream.color).as_video_stream_profile().get_intrinsics()
-            self.K = np.array([[intrinsics.fx, 0, intrinsics.ppx], [0, intrinsics.fy, intrinsics.ppy], [0, 0, 1.0]])
+            self.camera_matrix = np.array([[intrinsics.fx, 0, intrinsics.ppx], [0, intrinsics.fy, intrinsics.ppy], [0, 0, 1.0]])
             if self.crop is not None:
-                self.K[0, 2] -= self.crop[0]
-                self.K[1, 2] -= self.crop[1]
-            self.D = opencv_distortion(str(intrinsics.model), intrinsics.coeffs)
+                self.camera_matrix[0, 2] -= self.crop[0]
+                self.camera_matrix[1, 2] -= self.crop[1]
+            self.dist_coeffs = opencv_distortion(str(intrinsics.model), intrinsics.coeffs)
             self.info = dict(backend="realsense", serial=started.get_device().get_info(rs.camera_info.serial_number),
                              frame="color_optical", width=intrinsics.width, height=intrinsics.height,
-                             camera_matrix=self.K.tolist(), dist_coeffs=self.D.tolist(),
+                             camera_matrix=self.camera_matrix.tolist(), dist_coeffs=self.dist_coeffs.tolist(),
                              distortion_model=str(intrinsics.model))
             if self.crop is not None:
                 self.info.update(width=self.crop[2], height=self.crop[3], source_resolution=resolution,

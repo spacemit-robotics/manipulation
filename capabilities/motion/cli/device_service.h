@@ -1,7 +1,7 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
-#ifndef DEVICE_SERVICE_H
-#define DEVICE_SERVICE_H
+#ifndef MANIPULATION_CAPABILITIES_MOTION_CLI_DEVICE_SERVICE_H_
+#define MANIPULATION_CAPABILITIES_MOTION_CLI_DEVICE_SERVICE_H_
 #include "manipulation/device.h"
 // Quoted, escaped JSON string literal.
 std::string JsonString(const std::string& text);
@@ -10,4 +10,4 @@ std::string DeviceCapabilitiesJson(const spacemit::manipulation::DeviceSession& 
 int ServeDevice(spacemit::manipulation::DeviceSession& session, bool allow_motion, bool allow_enable,
     const std::function<bool()>& interrupted, const std::string& driver, bool allow_disable = false,
     bool allow_effector_enable = false, bool allow_effector_disable = false);
-#endif  // DEVICE_SERVICE_H
+#endif  // MANIPULATION_CAPABILITIES_MOTION_CLI_DEVICE_SERVICE_H_

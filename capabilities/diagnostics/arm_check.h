@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Supervised bounded arm check over the public device session.
-#ifndef ARM_CHECK_H
-#define ARM_CHECK_H
+#ifndef MANIPULATION_CAPABILITIES_DIAGNOSTICS_ARM_CHECK_H_
+#define MANIPULATION_CAPABILITIES_DIAGNOSTICS_ARM_CHECK_H_
 
 #include <functional>
 #include <ostream>
@@ -19,4 +19,4 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
     const std::function<bool()>& interrupted, std::ostream& out);
 
 }  // namespace spacemit::manipulation
-#endif  // ARM_CHECK_H
+#endif  // MANIPULATION_CAPABILITIES_DIAGNOSTICS_ARM_CHECK_H_

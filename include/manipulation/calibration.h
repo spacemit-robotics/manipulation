@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Offline eye-to-hand calibration. Row-major rigid transforms, translations in metres.
-#ifndef CALIBRATION_H
-#define CALIBRATION_H
+#ifndef MANIPULATION_CALIBRATION_H_
+#define MANIPULATION_CALIBRATION_H_
 #include <array>
 #include <vector>
 namespace spacemit::manipulation {
@@ -32,4 +32,4 @@ CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
     double max_translation_m = kDefaultMaxTranslationM, double max_rotation_rad = kDefaultMaxRotationRad);
 void ValidateTransform(const Transform& transform);
 }  // namespace spacemit::manipulation
-#endif  // CALIBRATION_H
+#endif  // MANIPULATION_CALIBRATION_H_

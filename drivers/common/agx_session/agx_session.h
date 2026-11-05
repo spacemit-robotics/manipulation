@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Private, serialized, reference-counted transport for arm and effector drivers.
-#ifndef AGX_SESSION_H
-#define AGX_SESSION_H
+#ifndef MANIPULATION_DRIVERS_COMMON_AGX_SESSION_AGX_SESSION_H_
+#define MANIPULATION_DRIVERS_COMMON_AGX_SESSION_AGX_SESSION_H_
 #include <memory>
 #include <string>
 #include <utility>
@@ -35,4 +35,4 @@ std::unique_ptr<Arm> MakeArm(const DeviceConfig& config, const DriverOptions& op
     std::shared_ptr<SharedSession> connection);
 std::unique_ptr<EndEffector> MakeEffector(const EffectorConfig& config, std::shared_ptr<SharedSession> connection);
 }  // namespace spacemit::manipulation::agx
-#endif  // AGX_SESSION_H
+#endif  // MANIPULATION_DRIVERS_COMMON_AGX_SESSION_AGX_SESSION_H_

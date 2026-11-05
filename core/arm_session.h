@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Internal arm execution used by DeviceSession. Not installed.
-#ifndef ARM_SESSION_H
-#define ARM_SESSION_H
+#ifndef MANIPULATION_CORE_ARM_SESSION_H_
+#define MANIPULATION_CORE_ARM_SESSION_H_
 
 #include <memory>
 #include <string>
@@ -60,4 +60,4 @@ private:
 };
 
 }  // namespace spacemit::manipulation
-#endif  // ARM_SESSION_H
+#endif  // MANIPULATION_CORE_ARM_SESSION_H_

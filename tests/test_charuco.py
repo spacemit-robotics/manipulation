@@ -19,8 +19,8 @@ except Exception as error:  # noqa: BLE001 - an unusable OpenCV/NumPy pair means
 
 BOARD = dict(type="charuco", dictionary="4x4_50", squares_x=4, squares_y=5, square_length_m=0.0215,
              marker_length_m=0.015, legacy_pattern=False, min_corners=6, max_reprojection_px=1.0)
-K = np.array([[900.0, 0, 480], [0, 900.0, 360], [0, 0, 1]])
-D = np.zeros(5)
+camera_matrix = np.array([[900.0, 0, 480], [0, 900.0, 360], [0, 0, 1]])
+dist_coeffs = np.zeros(5)
 PPM = 4000  # Board image pixels per metre.
 
 
@@ -38,7 +38,7 @@ def render(detector, camera_board):
     draw = board.generateImage if hasattr(board, "generateImage") else board.draw
     flat = draw(size, marginSize=0)
     to_metric = np.diag([1 / PPM, 1 / PPM, 1.0])
-    homography = K @ camera_board[:3, [0, 1, 3]] @ to_metric
+    homography = camera_matrix @ camera_board[:3, [0, 1, 3]] @ to_metric
     image = cv2.warpPerspective(flat, homography, (960, 720), flags=cv2.INTER_LINEAR, borderValue=255)
     return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
 
@@ -51,9 +51,9 @@ def difference(first, second):
 
 class Camera:
     def __init__(self, image):
-        self.image, self.K, self.D = image, K, D
+        self.image, self.camera_matrix, self.dist_coeffs = image, camera_matrix, dist_coeffs
         self.info = dict(backend="realsense", frame="color_optical", serial="rendered", width=960, height=720,
-                         camera_matrix=K.tolist(), dist_coeffs=D.tolist())
+                         camera_matrix=camera_matrix.tolist(), dist_coeffs=dist_coeffs.tolist())
 
     def capture(self):
         return self.image.copy()
@@ -99,7 +99,7 @@ class CharucoTests(unittest.TestCase):
         first, second = pose(0.25, -0.2, 0.1, -0.05, -0.04, 0.42), pose(-0.2, 0.3, -0.15, 0.02, -0.03, 0.38)
         found = []
         for truth in (first, second):
-            transform, quality, _ = detector.detect(render(detector, truth), K, D)
+            transform, quality, _ = detector.detect(render(detector, truth), camera_matrix, dist_coeffs)
             self.assertGreaterEqual(quality["corners"], 6)
             self.assertLess(quality["reprojection_rms_px"], 0.5)
             found.append(transform)
@@ -109,17 +109,17 @@ class CharucoTests(unittest.TestCase):
 
     def test_measured_size_scales_the_board(self):
         image = render(charuco.CharucoDetector(BOARD), pose(0.2, -0.1, 0.0, -0.04, -0.05, 0.40))
-        nominal = charuco.CharucoDetector(BOARD).detect(image, K, D)[0]
-        measured = charuco.CharucoDetector(BOARD, (0.086 * 1.02, 0.1075 * 1.02)).detect(image, K, D)[0]
+        nominal = charuco.CharucoDetector(BOARD).detect(image, camera_matrix, dist_coeffs)[0]
+        measured = charuco.CharucoDetector(BOARD, (0.086 * 1.02, 0.1075 * 1.02)).detect(image, camera_matrix, dist_coeffs)[0]
         self.assertAlmostEqual(measured[2, 3] / nominal[2, 3], 1.02, places=2)
 
     def test_no_board_and_roi_are_reported(self):
         detector = charuco.CharucoDetector(BOARD)
         with self.assertRaisesRegex(ValueError, "no ChArUco markers"):
-            detector.detect(np.full((720, 960, 3), 255, np.uint8), K, D)
+            detector.detect(np.full((720, 960, 3), 255, np.uint8), camera_matrix, dist_coeffs)
         hidden = charuco.CharucoDetector(dict(BOARD, image_roi_xyxy=[0, 0, 100, 100]))
         with self.assertRaises(ValueError):
-            hidden.detect(render(hidden, pose(0.2, -0.1, 0.0, -0.04, -0.05, 0.40)), K, D)
+            hidden.detect(render(hidden, pose(0.2, -0.1, 0.0, -0.04, -0.05, 0.40)), camera_matrix, dist_coeffs)
 
     def test_stationary_capture_and_motion_rejection(self):
         detector = charuco.CharucoDetector(BOARD)

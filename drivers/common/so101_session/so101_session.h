@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // SO101 composition and calibrated register access; private to the registered driver.
-#ifndef SO101_SESSION_H
-#define SO101_SESSION_H
+#ifndef MANIPULATION_DRIVERS_COMMON_SO101_SESSION_SO101_SESSION_H_
+#define MANIPULATION_DRIVERS_COMMON_SO101_SESSION_SO101_SESSION_H_
 
 #include <array>
 #include <memory>
@@ -85,4 +85,4 @@ std::unique_ptr<Arm> MakeArm(const DeviceConfig& definition, std::shared_ptr<Sha
 std::unique_ptr<EndEffector> MakeGripper(const EffectorConfig& definition,
     std::shared_ptr<SharedSession> session);
 }  // namespace spacemit::manipulation::so101
-#endif  // SO101_SESSION_H
+#endif  // MANIPULATION_DRIVERS_COMMON_SO101_SESSION_SO101_SESSION_H_
