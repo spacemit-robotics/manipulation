@@ -367,6 +367,11 @@ def check(prefix):
         ).is_file():  # Built on the K3 only.
             command("dice-arena", "serve", expected=2)
         assert '"mock_cycle": "passed"' in command("dice-arena", "check")
+        # The component tool reads the site's application without any environment variable.
+        listed = json.loads(command("dice-arena", "component", "list"))["components"]
+        assert {"robot_arm_spacemit", "tts_moss_nano"} <= {item["id"] for item in listed}, listed
+        selected = command("dice-arena", "component", "selected", "robot_arm")
+        assert selected.strip() == "robot_arm_spacemit", selected
         assert not (site / "arena").exists()
         token = "a" * 32
         command(
