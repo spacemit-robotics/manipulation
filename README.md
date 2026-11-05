@@ -10,6 +10,16 @@
 
 组件不自动使能、清错、归位或重试。设备独占、到位判定、取消、超时和故障锁定由设备会话统一处理。
 
+## 系统架构
+
+![manipulation 系统架构](docs/assets/architecture.svg)
+
+- **调用方**：C++ 应用链接组件库，在进程内使用 `DeviceSession`；命令行和 Python 应用使用 `DeviceClient`，它启动本机进程 `manipulation-device serve` 并经 JSONL 下发请求；YAML 点位任务由 `manipulation-device run` 执行。
+- **设备会话**：`core/` 的 `DeviceSession` 统一处理设备独占、到位判定、取消、超时和故障锁定，执行点位、连续路径、定时轨迹、目标跟随和末端执行器动作。
+- **驱动**：`runtime/` 解析 `device.yaml`，经注册表按 `device.driver` 创建驱动，驱动负责型号协议和单位转换。当前提供 Mock、Nero / Revo2、SO101 等驱动；新设备实现 `Arm` / `EndEffector` 并注册即可接入。
+- **设备**：Nero 驱动经独立 worker 进程调用厂商 SDK pyAgxArm，SO101 驱动经 `motor` 组件访问舵机总线。
+- **能力与工具**：运动学和手眼标定从 `device.yaml` 与 `descriptions/` 取得关节和模型，不写死型号；`so101-calibrate` 直接读写舵机寄存器，用于舵机校准。
+
 ## 1. 安装
 
 在 SDK 根目录执行：

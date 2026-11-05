@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="714" viewBox="0 0 960 714" role="img" aria-labelledby="title desc">
+  <title id="title">manipulation 系统架构</title>
+  <desc id="desc">调用方经 C++ DeviceSession 或 Python DeviceClient 使用组件；DeviceClient 启动本机进程 manipulation-device，经 JSONL 调用设备会话，C++ 应用在进程内直接创建设备会话。设备会话负责设备独占、到位判定、取消、超时和故障锁定，并调用按 device.driver 创建的驱动，如 Mock、Nero / Revo2、SO101 或扩展驱动。右侧为运动学、手眼标定、配置解析、机型描述和 SO101 舵机校准等能力与工具。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#475569"/>
+    </marker>
+  </defs>
+  <rect width="960" height="714" fill="#ffffff"/>
+  <g font-family="'Noto Sans CJK SC', 'PingFang SC', 'Microsoft YaHei', sans-serif">
+    <text x="480" y="30" font-size="19" font-weight="700" fill="#1f2937" text-anchor="middle">manipulation 系统架构</text>
+
+    <!-- 调用方 -->
+    <rect class="box" x="16" y="48" width="652" height="84" rx="10" fill="#f5f7fa" stroke="#d5dbe3" stroke-width="1.2"/>
+    <path d="M26 48 H96 V132 H26 Q16 132 16 122 V58 Q16 48 26 48 Z" fill="#64748b" fill-opacity="0.10"/>
+    <text x="56" y="95.5" font-size="15" font-weight="700" fill="#475569" text-anchor="middle">调用方</text>
+    <rect class="box" x="104" y="56" width="130" height="68" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="169" y="85.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">C++ 应用</text>
+    <text x="169" y="103.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">链接组件库</text>
+    <rect class="box" x="246" y="56" width="130" height="68" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="311" y="77.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">YAML 点位任务</text>
+    <text x="311" y="95.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">device.yaml steps</text>
+    <text x="311" y="112.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">固定顺序动作</text>
+    <rect class="box" x="388" y="56" width="130" height="68" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="453" y="77.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">命令行</text>
+    <text x="453" y="95.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">manipulation</text>
+    <text x="453" y="112.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">配置 · 示教 · 点动</text>
+    <rect class="box" x="530" y="56" width="130" height="68" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="595" y="77.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">Python 应用</text>
+    <text x="595" y="95.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">如 dice_arena</text>
+    <text x="595" y="112.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">抓杯与游戏</text>
+
+    <!-- 接口 -->
+    <rect class="box" x="16" y="158" width="652" height="84" rx="10" fill="#f2f7fd" stroke="#c9daf0" stroke-width="1.2"/>
+    <path d="M26 158 H96 V242 H26 Q16 242 16 232 V168 Q16 158 26 158 Z" fill="#3b6fb6" fill-opacity="0.10"/>
+    <text x="56" y="205.5" font-size="15" font-weight="700" fill="#2c5d9e" text-anchor="middle">接口</text>
+    <rect class="box" x="104" y="166" width="130" height="68" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4"/>
+    <text x="169" y="187.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">C++ 接口</text>
+    <text x="169" y="205.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">DeviceSession</text>
+    <text x="169" y="222.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">include/</text>
+    <rect class="box" x="388" y="166" width="272" height="68" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4"/>
+    <text x="524" y="195.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">Python 接口 DeviceClient</text>
+    <text x="524" y="213.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">spacemit_manipulation · 启动设备进程</text>
+
+    <!-- 设备进程 -->
+    <rect class="box" x="16" y="268" width="652" height="84" rx="10" fill="#f2f7fd" stroke="#c9daf0" stroke-width="1.2"/>
+    <path d="M26 268 H96 V352 H26 Q16 352 16 342 V278 Q16 268 26 268 Z" fill="#3b6fb6" fill-opacity="0.10"/>
+    <text x="56" y="307" font-size="15" font-weight="700" fill="#2c5d9e" text-anchor="middle">设备进程</text>
+    <text x="56" y="325" font-size="11" font-weight="400" fill="#6b7280" text-anchor="middle">本机独立进程</text>
+    <rect class="box" x="246" y="276" width="414" height="68" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4"/>
+    <text x="453" y="297.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">manipulation-device</text>
+    <text x="453" y="315.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">serve：经 JSONL 供 DeviceClient 调用</text>
+    <text x="453" y="332.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">run：执行 steps · inspect · arm-check</text>
+
+    <!-- 设备会话 -->
+    <rect class="box" x="16" y="378" width="652" height="84" rx="10" fill="#f2f7fd" stroke="#c9daf0" stroke-width="1.2"/>
+    <path d="M26 378 H96 V462 H26 Q16 462 16 452 V388 Q16 378 26 378 Z" fill="#3b6fb6" fill-opacity="0.10"/>
+    <text x="56" y="417" font-size="15" font-weight="700" fill="#2c5d9e" text-anchor="middle">设备会话</text>
+    <text x="56" y="435" font-size="11" font-weight="400" fill="#6b7280" text-anchor="middle">core/</text>
+    <rect class="box" x="104" y="386" width="556" height="68" rx="8" fill="#e9f1fb" stroke="#2c5d9e" stroke-width="2"/>
+    <text x="382" y="407.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">设备会话 DeviceSession</text>
+    <text x="382" y="425.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">设备独占 · 到位判定 · 取消 · 超时 · 故障锁定</text>
+    <text x="382" y="442.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">点位 · 连续路径 · 定时轨迹 · 目标跟随 · 末端执行器动作</text>
+
+    <!-- 驱动 -->
+    <rect class="box" x="16" y="488" width="652" height="76" rx="10" fill="#f2f7fd" stroke="#c9daf0" stroke-width="1.2"/>
+    <path d="M26 488 H96 V564 H26 Q16 564 16 554 V498 Q16 488 26 488 Z" fill="#3b6fb6" fill-opacity="0.10"/>
+    <text x="56" y="523" font-size="15" font-weight="700" fill="#2c5d9e" text-anchor="middle">驱动</text>
+    <text x="56" y="541" font-size="11" font-weight="400" fill="#6b7280" text-anchor="middle">drivers/</text>
+    <rect class="box" x="104" y="496" width="130" height="60" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4"/>
+    <text x="169" y="521.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">mock_device</text>
+    <text x="169" y="539.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">软件模拟</text>
+    <rect class="box" x="246" y="496" width="130" height="60" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4"/>
+    <text x="311" y="521.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">agx_nero_revo2</text>
+    <text x="311" y="539.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">Nero 七轴 · Revo2</text>
+    <rect class="box" x="388" y="496" width="130" height="60" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4"/>
+    <text x="453" y="521.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">so101</text>
+    <text x="453" y="539.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">SO101 五轴 · 夹爪</text>
+    <rect class="box" x="530" y="496" width="130" height="60" rx="8" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4" stroke-dasharray="5 4"/>
+    <text x="595" y="513.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">扩展驱动</text>
+    <text x="595" y="531.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">Arm / EndEffector</text>
+    <text x="595" y="548.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">注册后按配置加载</text>
+
+    <!-- 设备 -->
+    <rect class="box" x="16" y="590" width="652" height="80" rx="10" fill="#f5f7fa" stroke="#d5dbe3" stroke-width="1.2"/>
+    <path d="M26 590 H96 V670 H26 Q16 670 16 660 V600 Q16 590 26 590 Z" fill="#64748b" fill-opacity="0.10"/>
+    <text x="56" y="627" font-size="15" font-weight="700" fill="#475569" text-anchor="middle">设备</text>
+    <text x="56" y="645" font-size="11" font-weight="400" fill="#6b7280" text-anchor="middle">厂商 SDK</text>
+    <rect class="box" x="104" y="598" width="130" height="64" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="169" y="625.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">仿真</text>
+    <text x="169" y="643.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">无需硬件</text>
+    <rect class="box" x="246" y="598" width="130" height="64" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="311" y="617.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">Nero · Revo2</text>
+    <text x="311" y="635.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">pyAgxArm worker</text>
+    <text x="311" y="652.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">USB-CAN 1 Mbps</text>
+    <rect class="box" x="388" y="598" width="130" height="64" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4"/>
+    <text x="453" y="617.3" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">SO101 舵机</text>
+    <text x="453" y="635.6" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">motor 组件</text>
+    <text x="453" y="652.1" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">USB 串口 1 Mbps</text>
+    <rect class="box" x="530" y="598" width="130" height="64" rx="8" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.4" stroke-dasharray="5 4"/>
+    <text x="595" y="625.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">新设备</text>
+    <text x="595" y="643.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">自定义协议</text>
+
+    <!-- 主调用链 -->
+    <path d="M169 124 L169 166" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M169 234 L169 386" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="177" y="314" font-size="11.5" font-weight="400" fill="#374151" text-anchor="start" class="label">进程内</text>
+    <path d="M311 124 L311 276" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="319" y="204" font-size="11.5" font-weight="400" fill="#374151" text-anchor="start" class="label">run</text>
+    <path d="M453 124 L453 166" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M595 124 L595 166" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M524 234 L524 276" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="532" y="259" font-size="11.5" font-weight="400" fill="#374151" text-anchor="start" class="label">JSONL</text>
+    <path d="M453 344 L453 386" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M169 454 L169 496" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M169 556 L169 598" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M311 454 L311 496" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M311 556 L311 598" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M453 454 L453 496" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M453 556 L453 598" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M595 454 L595 496" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M595 556 L595 598" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+    <!-- 能力与工具 -->
+    <rect class="box" x="688" y="48" width="256" height="622" rx="10" fill="#f2f8f4" stroke="#c6e2d1" stroke-width="1.2"/>
+    <text x="816" y="74" font-size="15" font-weight="700" fill="#2f7a4f" text-anchor="middle">能力与工具</text>
+    <rect class="box" x="700" y="88" width="232" height="66" rx="8" fill="#ffffff" stroke="#3f8f5f" stroke-width="1.4"/>
+    <text x="816" y="116.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">运动学 urdf_fk · urdf_ik</text>
+    <text x="816" y="134.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">位姿 · 逆解 · 直线路点</text>
+    <rect class="box" x="700" y="166" width="232" height="66" rx="8" fill="#ffffff" stroke="#3f8f5f" stroke-width="1.4"/>
+    <text x="816" y="194.5" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">手眼标定 hand-eye</text>
+    <text x="816" y="212.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">ChArUco 采样 · 求解 · 导出外参</text>
+    <rect class="box" x="700" y="280" width="232" height="128" rx="8" fill="#ffffff" stroke="#3f8f5f" stroke-width="1.4"/>
+    <text x="816" y="323" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">配置解析 runtime/</text>
+    <text x="816" y="341.3" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">解析 device.yaml</text>
+    <text x="816" y="357.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">经注册表创建驱动</text>
+    <text x="816" y="374.3" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">执行 steps 点位任务</text>
+    <rect class="box" x="700" y="440" width="232" height="92" rx="8" fill="#ffffff" stroke="#3f8f5f" stroke-width="1.4"/>
+    <text x="816" y="465" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">机型描述 descriptions/</text>
+    <text x="816" y="483.3" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">URDF · model.json</text>
+    <text x="816" y="499.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">配置模板</text>
+    <text x="816" y="516.3" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">configure 生成 device.yaml</text>
+    <rect class="box" x="700" y="556" width="232" height="102" rx="8" fill="#ffffff" stroke="#3f8f5f" stroke-width="1.4"/>
+    <text x="816" y="586" font-size="14" font-weight="600" fill="#1f2937" text-anchor="middle">SO101 舵机校准</text>
+    <text x="816" y="604.3" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">so101-calibrate</text>
+    <text x="816" y="620.8" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">直接读写舵机寄存器</text>
+    <text x="816" y="637.3" font-size="12" font-weight="400" fill="#4b5563" text-anchor="middle">参数 · 中位 · 行程 · 限位</text>
+    <path d="M700 110 L660 110" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <path d="M700 200 L660 200" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M660 310 L700 310" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <path d="M700 398 L660 398" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <path d="M740 440 L740 408" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="748" y="428" font-size="11.5" font-weight="400" fill="#374151" text-anchor="start" class="label">device.yaml</text>
+
+    <!-- 图例 -->
+    <path d="M104 692 L140 692" fill="none" stroke="#475569" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <text x="148" y="696" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="start">调用</text>
+    <path d="M196 692 L232 692" fill="none" stroke="#475569" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+    <text x="240" y="696" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="start">数据 / 配置</text>
+    <rect x="320" y="685" width="26" height="14" rx="3" fill="#ffffff" stroke="#3b6fb6" stroke-width="1.4" stroke-dasharray="5 4"/>
+    <text x="354" y="696" font-size="11.5" font-weight="400" fill="#6b7280" text-anchor="start">扩展位置</text>
+  </g>
+</svg>
