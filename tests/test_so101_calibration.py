@@ -166,6 +166,31 @@ class RegisterTests(unittest.TestCase):
                          [(1000, 3000), (1900, 2900)])
         self.assertTrue(all(servos.read(i, calibration.LOCK, 1) == 1 for i in range(1, 7)))
 
+    def test_all_runs_the_full_setup_in_order_and_saves_before_limits(self):
+        servos = Servos([1, 2, 3, 4, 5, 6], actual=2048)
+        moves = iter([None] + [value for _ in range(5) for value in (1001, 3001)] + [1501, 2801])
+        moving = iter([motor for motor in range(1, 6) for _ in range(2)] + [6, 6])
+
+        def prompt(_):
+            value = next(moves)
+            if value is not None:  # The first prompt holds the zero pose for center.
+                servos.actual[next(moving)] = value
+
+        saved = []
+
+        def save(arm, gripper):
+            saved.append((arm, gripper))
+            self.assertEqual(servos.read(1, 9, 2), 0)  # Limits are still open when the files are saved.
+
+        arm, gripper = calibration.calibrate_all(servos, [1, 2, 3, 4, 5], 6, save, prompt, settle_s=0)
+        self.assertEqual(saved, [(arm, gripper)])
+        self.assertEqual(servos.read(1, 21, 1), 16)  # configure
+        self.assertEqual(calibration.offset(servos, 1), 1)  # center: 2048 - 2047
+        self.assertEqual(arm["wrist_roll"], {"id": 5, "homing_offset": 1, "range_min": 1000, "range_max": 3000})
+        self.assertEqual(gripper, {"motor_id": 6, "open_ticks": 1500, "closed_ticks": 2800, "homing_offset": 1})
+        self.assertEqual([(servos.read(i, 9, 2), servos.read(i, 11, 2)) for i in (1, 6)], [(1000, 3000), (1500, 2800)])
+        self.assertFalse(any(address == 40 for _, address, _ in servos.writes))
+
     def test_capture_writes_nothing_and_matches_limits(self):
         servos = Servos([6])
         readings = iter([2900, 1900])

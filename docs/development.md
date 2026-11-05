@@ -83,7 +83,11 @@
 
 臂和手共用一个控制器连接时，由同一个组合驱动创建两者并共享连接对象，参考
 `drivers/common/agx_session/` 或 `drivers/common/so101_session/`。
-SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件的公开接口：`motor_alloc_uart` 打开串口，`motor_get_paras` / `motor_set_paras` 读写寄存器。不调用 `motor_init`（它每次连接都改写 EEPROM 中的工作模式）；`motor_set_paras` 不报告丢失的写入，所以每次写入后都读回确认。
+SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件的公开接口：
+
+- `motor_alloc_uart` 打开串口，`motor_get_paras` / `motor_set_paras` 读写寄存器；
+- 不调用 `motor_init`，因为它每次连接都改写 EEPROM 中的工作模式；
+- `motor_set_paras` 不报告丢失的写入，所以每次写入后都读回确认。
 厂商 SDK 运行在独立 worker 进程时：
 
 - worker 只开放固定操作，不接受任意方法名。
@@ -165,4 +169,4 @@ bash tools/verify_stack.sh   # 全部软件测试，不访问硬件
 ```
 
 脚本构建并测试组件（含 Nero 替身和标定）、抓杯应用、扩展驱动示例、安装后的 C++ 接入和命令行，
-并检查安装目录移动和符号链接。测试使用独立的锁目录，不影响本机正在运行的程序。
+并检查安装目录移动和符号链接。测试通过环境变量 `MANIPULATION_LOCK_DIRECTORY` 使用独立的锁目录，不影响本机正在运行的程序。

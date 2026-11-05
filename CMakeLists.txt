@@ -17,7 +17,7 @@ set(MANIPULATION_MOTOR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../peripherals
     "Motor source tree for the SO101 driver; otherwise use an installed motor package")
 if(MANIPULATION_ENABLE_SO101)
     if(EXISTS "${MANIPULATION_MOTOR_SOURCE_DIR}/CMakeLists.txt")
-        # Only its Feetech driver, as the former manipulator component builds it; not installed from here.
+        # Only its Feetech driver; not installed from here.
         set(SROBOTIS_PERIPHERALS_MOTOR_ENABLED_DRIVERS "drv_uart_feetech" CACHE STRING
             "Enabled motor drivers (semicolon-separated). Empty means auto-detect." FORCE)
         set(BUILD_TESTS OFF CACHE BOOL "Build test programs" FORCE)

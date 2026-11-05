@@ -1,6 +1,6 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
-// Explicit transactions preserve the legacy centered-angle mapping without its startup writes.
+// Explicit register transactions with the centered-angle mapping and no writes on connection.
 #include "so101_session.h"
 
 #include <yaml-cpp/yaml.h>
@@ -45,6 +45,8 @@ int Integer(const YAML::Node& node, const char* key, int minimum, int maximum) {
     return static_cast<int>(value);
 }
 YAML::Node CalibrationFile(const std::string& path) {
+    Require(std::filesystem::is_regular_file(path),
+        "calibration file not found: " + path + "; create it with `so101-calibrate capture`");
     Require(std::filesystem::file_size(path) <= 65536, "calibration file is too large");
     auto root = YAML::LoadFile(path);
     Require(root.IsMap(), "calibration must be an object");

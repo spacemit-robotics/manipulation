@@ -144,7 +144,7 @@ def kinematics(context, args):
     described = context.describe(plan)
     limits = described["joint_limits_rad"]
     if args.operation == "ik" and args.seed_pose:  # Offline: the seed comes from a saved pose.
-        seed = json.loads(context.local(args.seed_pose).read_text(encoding="utf-8"))["state"]["joints_rad"]
+        seed = json.loads(context.device_file(plan, args.seed_pose).read_text(encoding="utf-8"))["state"]["joints_rad"]
         result = solve(model, target, seed, orientation_weight=weight, limits=limits)
         print(json.dumps(result))
         if not result["converged"]:
@@ -219,12 +219,15 @@ def main():
     check = commands.add_parser("check", help="verify dependencies without opening hardware")
     check.add_argument("--profile", choices=("build", "control", "vision"), default="control")
     commands.add_parser("demo", help="run the Mock arm and hand point task; no hardware")
-    configure = commands.add_parser("configure", help="create SITE/device.yaml from a model template")
+    configure = commands.add_parser("configure", help="create SITE/MODEL/device.yaml from a model template "
+                                                      "and make it the current device")
     configure.add_argument("model", help="robot description, for example nero")
     configure.add_argument("--variant", default="arm", help="template under the model's devices/ (default: arm)")
     configure.add_argument("--set", action="append", default=[], metavar="NAME=VALUE",
                            help="template value, for example channel=can1")
     configure.add_argument("--python", default="python3", help="interpreter for vendor workers")
+    use = commands.add_parser("use", help="choose the current device, or list the configured devices")
+    use.add_argument("name", nargs="?", help="configured device, normally the model name")
     for name, text in (("validate", "check the configuration offline"), ("inspect", "connect and read; no motion"),
                        ("capabilities", "show supported device operations without opening hardware"),
                        ("arm-check", "bounded supervised arm motion check")):
@@ -278,7 +281,7 @@ def main():
                              help="0 position only, up to 1 full orientation (default 1 with --rpy, else 0)")
         command.add_argument("--plan")
         if name == "ik":
-            command.add_argument("--seed-pose", help="solve offline from a saved pose (relative to --site)")
+            command.add_argument("--seed-pose", help="solve offline from a saved pose, relative to the device directory")
         else:
             command.add_argument("--speed", type=float, default=0.05, help="controller speed scale in (0,1]")
         if name == "line-move":
@@ -287,10 +290,10 @@ def main():
                                  help="joint-path drivers: largest joint speed, rad/s (default 0.2)")
             command.add_argument("--path-acceleration", type=float, default=0.5,
                                  help="joint-path drivers: largest joint acceleration, rad/s^2 (default 0.5)")
-    for name, text in (("teach", "save the stationary state to a new SITE file"),
+    for name, text in (("teach", "save the stationary state to a new file in the device directory"),
                        ("fk", "forward kinematics of a saved pose")):
         command = commands.add_parser(name, help=text)
-        command.add_argument("pose", help="pose filename, relative to --site")
+        command.add_argument("pose", help="pose filename, relative to the device directory")
         command.add_argument("--plan")
     manifest = commands.add_parser("manifest", help="record source/install fingerprints without hardware")
     manifest.add_argument("--source", default=".")
@@ -306,9 +309,20 @@ def main():
     elif args.operation == "demo":
         context.execute([device, "run", context.data("manipulation") / "examples/mock_device.yaml"])
     elif args.operation == "configure":
+        context.check_selectable()
         tool = load_tool(context.data("manipulation") / "tools/configure_device.py")
-        tool.configure(context.prefix, args.model, context.local("device.yaml"), args.variant,
+        tool.configure(context.prefix, args.model, context.local(args.model) / "device.yaml", args.variant,
                        tool.parse_values(args.set), args.python)
+        context.select(args.model)
+        print(f"current device: {args.model}")
+    elif args.operation == "use":
+        if args.name:
+            context.select(args.name)
+        current = context.current()
+        for name in context.devices():
+            print(("* " if name == current else "  ") + name)
+        if not context.devices():
+            print("no device configured; create one with `manipulation configure MODEL`")
     elif args.operation in ("validate", "inspect", "capabilities"):
         context.execute([device, args.operation, context.plan(args.plan)])
     elif args.operation in ("enable", "disable", "hand-enable", "hand-disable", "hold", "hand-hold"):
@@ -329,15 +343,17 @@ def main():
     elif args.operation in ("pose", "ik", "pose-move", "line-move"):
         kinematics(context, args)
     elif args.operation == "teach":
-        if context.local(args.pose).exists():
-            raise FileExistsError(str(context.local(args.pose)))
-        context.module("spacemit_manipulation.workbench", "teach", device, context.plan(args.plan),
-                       context.local(args.pose))
+        plan = context.plan(args.plan)
+        pose = context.device_file(plan, args.pose)
+        if pose.exists():
+            raise FileExistsError(str(pose))
+        context.module("spacemit_manipulation.workbench", "teach", device, plan, pose)
     elif args.operation == "fk":
-        if not context.local(args.pose).is_file():
-            raise FileNotFoundError(f"{context.local(args.pose)} not found; record one with `manipulation teach`")
-        context.module("spacemit_manipulation.workbench", "fk", context.model(context.plan(args.plan)),
-                       context.local(args.pose))
+        plan = context.plan(args.plan)
+        pose = context.device_file(plan, args.pose)
+        if not pose.is_file():
+            raise FileNotFoundError(f"{pose} not found; record one with `manipulation teach`")
+        context.module("spacemit_manipulation.workbench", "fk", context.model(plan), pose)
     elif args.operation == "manifest":
         arguments = [args.source, args.build, context.local(args.output)]
         for external in args.external:

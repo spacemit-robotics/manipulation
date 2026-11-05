@@ -69,7 +69,7 @@ def check(prefix):
 
         for name in ("manipulation", "hand-eye", "dice-arena"):
             assert command(name, "--help").startswith("usage: " + name + " ")
-        for operation in ("check", "demo", "configure", "validate", "inspect", "capabilities", "arm-check", "enable",
+        for operation in ("check", "demo", "configure", "use", "validate", "inspect", "capabilities", "arm-check", "enable",
                           "disable", "hand-enable", "hand-disable", "hold", "hand-hold", "joint-step", "joint-move",
                           "hand-move", "hand-step", "hand-grasp", "pose", "monitor", "ik", "pose-move", "line-move",
                           "teach", "fk", "manifest"):
@@ -81,18 +81,45 @@ def check(prefix):
         command("manipulation", "configure", "unknown_model", expected=2, error="available: nero")
         command("manipulation", "configure", "nero", "--variant", "missing", expected=2,
                 error="available: arm, revo2_right")
-        command("manipulation", "validate", expected=2)  # No site device.yaml yet.
+        command("manipulation", "validate", expected=2, error="manipulation configure MODEL")  # No device yet.
         command("manipulation", "configure", "nero", "--variant", "revo2_right", "--set", "channel=can1")
+        assert os.readlink(site / "device.yaml") == "nero/device.yaml"  # Configuring selects the device.
         device = (site / "device.yaml").read_text()
         assert "channel: can1" in device and "agx_can1" in device, device
         # Resources are written relative to device.yaml and must resolve into this installation.
         for key, expected in (("sdk_root", "pyagxarm"), ("worker", "manipulation/agx_worker.py")):
             value = re.search(r"(?m)^\s*" + key + r":\s*(\S+)", device).group(1)
-            resolved = (site / value).resolve()
+            resolved = (site / "nero" / value).resolve()
             assert not Path(value).is_absolute() and resolved.is_relative_to(prefix), (key, value)
             assert resolved.as_posix().endswith(expected) and resolved.exists(), (key, resolved)
         command("manipulation", "validate")  # Offline validation of Nero resources is safe.
-        command("manipulation", "configure", "nero", expected=2)  # Never overwrites device.yaml.
+        command("manipulation", "configure", "nero", expected=2, error="manipulation use nero")  # Never overwrites.
+        # SO101 templates name the calibration files so101-calibrate keeps beside the SO101 configuration.
+        command("manipulation", "configure", "so101", "--variant", "gripper",
+                "--set", "port=/dev/null", expected=2, error="so101-calibrate capture")  # Not calibrated yet.
+        assert not (site / "so101/device.yaml").exists()
+        assert os.readlink(site / "device.yaml") == "nero/device.yaml"  # A failed configure selects nothing.
+        command("so101-calibrate", "limits", "--port", "/dev/null", expected=1, error=str(site / "so101"))
+        write(site / "so101/so101_calibration.json", {name: dict(id=index + 1, homing_offset=0, range_min=300,
+              range_max=3800) for index, name in enumerate(
+                  ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"))})
+        write(site / "so101/so101_gripper_calibration.json", dict(motor_id=6, open_ticks=3400, closed_ticks=2000))
+        command("manipulation", "configure", "so101", "--variant", "gripper", "--set", "port=/dev/null")
+        assert 'arm_calibration: "so101_calibration.json"' in (site / "device.yaml").read_text()
+        # `use` lists the configured devices and switches among them; each keeps its own files.
+        assert command("manipulation", "use") == "  nero\n* so101\n"
+        assert command("manipulation", "use", "nero") == "* nero\n  so101\n"
+        assert "agx_can1" in (site / "device.yaml").read_text()
+        command("manipulation", "use", "missing", expected=2, error="configured: nero, so101")
+        command("manipulation", "use", "..", expected=2, error="configured: nero, so101")
+        assert os.readlink(site / "device.yaml") == "nero/device.yaml"
+        (site / "device.yaml").unlink()
+        command("manipulation", "validate", expected=2, error="manipulation use NAME")
+        write(site / "device.yaml", "plain")  # Never replaces a file it did not create.
+        command("manipulation", "use", "nero", expected=2, error="plain file")
+        command("manipulation", "configure", "nero", expected=2, error="plain file")
+        assert (site / "device.yaml").read_text() == "plain"
+        (site / "device.yaml").unlink()
 
         # Every subsequent device operation uses an explicit seven-axis Mock, never the Nero file above.
         plan = dict(schema_version=3, device=dict(driver="mock_device", model="nero", arm=dict(
@@ -100,7 +127,8 @@ def check(prefix):
                 maximum_rad=3) for i in range(1, 8)]), effector=dict(device_id="hand", channels=[
                     "thumb_tip", "thumb_base", "index_finger", "middle_finger", "ring_finger", "pinky_finger"])),
             steps=[])
-        write(site / "device.yaml", plan)
+        write(site / "mock/device.yaml", plan)
+        command("manipulation", "use", "mock")
         command("manipulation", "inspect")
         assert "cancel=cancelled" in command("manipulation", "arm-check")  # Runs directly, no opt-in.
         command("manipulation", "hand-step", "2", "0.01", "--allow-motion", expected=2)  # Removed opt-in.
@@ -125,6 +153,7 @@ def check(prefix):
         command("manipulation", "teach", "pose.json")
         command("manipulation", "teach", "pose.json", expected=2)
         command("manipulation", "fk", "pose.json")
+        assert (site / "mock/pose.json").is_file()  # Poses stay with the device they were recorded on.
         # Cartesian tools on the Mock (all joints 0 at each connection): read-only pose and IK, then moves.
         tip = json.loads(command("manipulation", "pose"))["position_m"]
         offset = [tip[0] + 0.02, tip[1], tip[2] - 0.01]
@@ -168,10 +197,13 @@ def check(prefix):
         command("dice-arena", "cycle", expected=2)
         command("dice-arena", "--source", source, "configure", expected=2)  # No site pipeline before `apply`.
         write(site / "green_cup.json", green)  # Normally created by `calibrate.sh apply`.
+        command("manipulation", "use", "so101")  # The application is written for the Nero model.
+        command("dice-arena", "--source", source, "configure", expected=2, error="manipulation use nero")
+        command("manipulation", "use", "mock")
         command("dice-arena", "--source", source, "configure")
         command("dice-arena", "--source", source, "configure", expected=1)
         application = json.loads((site / "cup_application.json").read_text())
-        assert not Path(application["device_plan"]).is_absolute()
+        assert application["device_plan"] == "mock/device.yaml", application  # Unaffected by a later `use`.
         assert application["planner"]["config"] == "green_cup.json", application["planner"]
         # Replace only the test application with the known installed Mock cycle to exercise the short aliases.
         mock = prefix / layout["datadir"] / "dice_arena/config/mock.json"

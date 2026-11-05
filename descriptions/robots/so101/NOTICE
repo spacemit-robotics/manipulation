@@ -1,6 +1,5 @@
 SO101 model
 
-Source: SpacemiT Robot SDK components/control/manipulator/urdf/so101.urdf.
 Derived from TheRobotStudio/SO-ARM100:
 https://github.com/TheRobotStudio/SO-ARM100
 Original file: Simulation/SO101/so101_new_calib.urdf.

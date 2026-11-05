@@ -20,8 +20,8 @@ constexpr size_t kArmJoints = 5;
 constexpr double kSpeedTickRadS = 6.28318530717958647692 / 4096.0;
 // Status bit 5: overload protection is active and output is limited to Overload_Torque.
 constexpr uint8_t kOverloadError = 0x20;
-// Gripper protection written by `so101-calibrate configure` (the values LeRobot and the former
-// grasp component used): enabling an unconfigured gripper could stall it at full torque.
+// Gripper protection written by `so101-calibrate configure` (LeRobot's values): enabling an
+// unconfigured gripper could stall it at full torque.
 constexpr int kGripperTorqueLimit = 500;          // Max_Torque_Limit, 0.1 % of rated torque
 constexpr int kGripperProtectionCurrent = 250;    // Protection_Current, mA
 struct Calibration {

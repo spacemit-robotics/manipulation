@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Numerical inverse kinematics and Cartesian lines on a UrdfKinematics chain; no device access.
 
-Damped least squares with the former manipulator component's constants (damping 1e-4, step 0.5
-halved down to 0.01, joint change at most 0.5 rad per iteration, 0.5 mm, 200 iterations). Targets
+Damped least squares (damping 1e-4, step 0.5 halved down to 0.01, joint change at most 0.5 rad per
+iteration, 0.5 mm, 200 iterations). Targets
 are base-frame poses of the model tip. orientation_weight 0 solves position only: a five-joint arm
 such as the SO101 cannot reach an arbitrary orientation.
 """

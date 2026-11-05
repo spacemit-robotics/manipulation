@@ -22,7 +22,7 @@ def argument_parser(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument("--prefix", required=True, help=argparse.SUPPRESS)
     parser.add_argument("--site", default=default_site(),
-                        help="site directory for device.yaml, poses and calibration "
+                        help="site directory holding one subdirectory per device and the current device "
                              "(default: $MANIPULATION_SITE or ~/.local/share/spacemit-manipulation/site)")
     return parser
 
@@ -49,11 +49,58 @@ class Context:
         return self.site / name
 
     def plan(self, override=None):
-        """The site device configuration, or an explicit --plan."""
+        """The current device's configuration (SITE/device.yaml), or an explicit --plan."""
         plan = Path(override).absolute() if override else self.local("device.yaml")
-        if not plan.is_file():
-            raise FileNotFoundError(f"{plan} not found; create it with `manipulation configure MODEL`")
+        if plan.is_file():
+            return plan
+        if override:
+            raise FileNotFoundError(f"{plan} not found")
+        devices = self.devices()
+        if devices:
+            raise FileNotFoundError(f"no current device; choose one with `manipulation use NAME` "
+                                    f"(configured: {', '.join(devices)})")
+        raise FileNotFoundError("no device configured; create one with `manipulation configure MODEL`")
+
+    def plan_for(self, model, override=None):
+        """The current device, for an application written for one robot model."""
+        plan = self.plan(override)
+        actual = self.describe(plan)["model"]
+        if actual != model:
+            raise ValueError(f"this application needs a {model} device, but {plan} is {actual or 'another device'}; "
+                             f"select it with `manipulation use {model}`")
         return plan
+
+    def devices(self):
+        """Configured devices: SITE/<name>/device.yaml."""
+        return sorted(path.parent.name for path in self.site.glob("*/device.yaml") if path.is_file())
+
+    def current(self):
+        """The current device's name, or None."""
+        link = self.local("device.yaml")
+        if link.is_symlink() and link.is_file():
+            return link.resolve().parent.name
+        return None
+
+    def check_selectable(self):
+        """SITE/device.yaml must be the selection link, never a configuration of its own."""
+        link = self.local("device.yaml")
+        if link.exists() and not link.is_symlink():
+            raise FileExistsError(f"{link} is a plain file, not a device selection; "
+                                  "move it aside and configure the device again")
+
+    def select(self, name):
+        """Make SITE/<name>/device.yaml the current device: SITE/device.yaml links to it."""
+        self.check_selectable()
+        if name not in self.devices():
+            raise FileNotFoundError(f"no device {name!r}; configured: {', '.join(self.devices()) or 'none'}")
+        temporary = self.local(".device.yaml.new")
+        temporary.unlink(missing_ok=True)
+        temporary.symlink_to(Path(name) / "device.yaml")
+        os.replace(temporary, self.local("device.yaml"))
+
+    def device_file(self, plan, name):
+        """A file kept beside a device configuration, such as a recorded pose."""
+        return Path(plan).resolve().parent / name
 
     def describe(self, plan):
         """Driver, model, joint and channel names, parsed by the C++ loader. Never opens a device."""

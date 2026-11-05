@@ -4,7 +4,7 @@
 
 ## 1. 设备配置
 
-`manipulation configure` 按型号模板生成 `device.yaml`，也可手写。文件为单个 YAML 文档，不超过 64 KiB，未知或重复字段一律拒绝。
+`manipulation configure MODEL` 按型号模板生成 `SITE/MODEL/device.yaml`，也可手写。文件为单个 YAML 文档，不超过 64 KiB，未知或重复字段一律拒绝。
 
 ```yaml
 schema_version: 3
@@ -49,7 +49,9 @@ steps:                            # 0–128 步，run 按顺序执行
 | `position` | 新鲜、完整的位置和状态反馈 | 连续 3 个样本在容差内且静止时 `succeeded` | 驱动确认停止为 `cancelled`，否则 `stop_unknown` |
 | `none` | 只要求新鲜的在线样本 | 下发后等待 `duration_s`，结果 `unverified` | 始终 `stop_unknown` |
 
-所有末端的位置含义相同：`0` 闭合，`1` 张开，由驱动转换为设备自身的刻度。`none` 只降低验证要求，不会让驱动声称具备反馈。经 Nero 末端口接入的 Revo2 静止时不上报位置，须用 `none`；此时以手指电流帧作为在线证据，手侧显示为 `unknown`。
+- 所有末端的位置含义相同：`0` 闭合，`1` 张开，由驱动转换为设备自身的刻度。
+- `none` 只降低验证要求，不会让驱动声称具备反馈。
+- 经 Nero 末端口接入的 Revo2 静止时不上报位置，须用 `none`；此时以手指电流帧作为在线证据，手侧显示为 `unknown`。
 
 ### 驱动选项
 
@@ -62,8 +64,8 @@ steps:                            # 0–128 步，run 按顺序执行
 | | `worker` | `agx_worker.py` 路径 |
 | `so101` | `port` | 必填，串口路径，相对配置目录解析 |
 | | `arm_ids` / `gripper_id` | 关节 ID（默认 `1,2,3,4,5`）/ 夹爪 ID（默认 `6`），不能重复 |
-| | `arm_calibration` | 机械臂行程文件；省略时只能读取状态 |
-| | `gripper_calibration` | 夹爪行程文件，配置夹爪时必填 |
+| | `arm_calibration` | 机械臂校准文件，模板默认 `so101_calibration.json`；配置中省略时只能读取状态 |
+| | `gripper_calibration` | 夹爪校准文件，模板默认 `so101_gripper_calibration.json`；配置夹爪时必填 |
 | | `max_velocity_rad_s` | 速度倍率为 1 时的关节速度，`0.01–3.6`，默认 `1.0` |
 | | `grip_load_threshold` | 判定夹住的最小负载，`1–1000`（额定输出的 0.1%），默认 `100` |
 
@@ -79,7 +81,7 @@ steps:                            # 0–128 步，run 按顺序执行
 - 行程文件格式：
   - 机械臂按关节名保存 `id`、`homing_offset`、`range_min`、`range_max`；
   - 夹爪保存 `motor_id`、`open_ticks`、`closed_ticks` 和 `homing_offset`。
-  - 原 `grasp` 夹爪文件不含 `homing_offset`，只能用于中位未改变的原安装。
+  - 夹爪文件可省略 `homing_offset`，此时驱动不核对夹爪偏移，文件只能用于偏移未改变的安装。
 - **抓握判断**（能力 `grasp_detection`）：
   - 闭合目标未到达、夹爪静止，且负载绝对值不低于 `grip_load_threshold` 时，`effector_holding` 为 `true`；
   - 连续三个这样的样本使动作以 `effector_grasp_holding` 成功结束；
@@ -115,7 +117,9 @@ steps:                            # 0–128 步，run 按顺序执行
 
 `serve` 的 `--allow-disable`、`--allow-effector-enable`、`--allow-effector-disable` 分别授权机械臂失能、末端使能、末端失能，默认关闭。
 
-退出码：`0` 成功，`1` 任务未成功或被中断，`2` 参数、配置或连接错误，`3` 全部步骤完成但含 `unverified` 步骤。`run` 最后一行为 `{"status":"succeeded","physical_grip_verified":false}` 形式的汇总结果。
+退出码：`0` 成功；`1` 任务未成功或被中断；`2` 参数、配置或连接错误；`3` 全部步骤完成，但含 `unverified` 步骤。
+
+`run` 最后一行是汇总结果，形如 `{"status":"succeeded","physical_grip_verified":false}`。
 
 **状态字段**（`inspect` 输出，Python `state()` 字段相同）：
 
@@ -131,12 +135,16 @@ steps:                            # 0–128 步，run 按顺序执行
 
 ### manipulation / hand-eye
 
-全局选项 `--site DIR` 写在子命令前，默认 `$MANIPULATION_SITE` 或 `~/.local/share/spacemit-manipulation/site`。设备类子命令默认使用 `SITE/device.yaml`，可用 `--plan FILE` 替换。所有命令都不自动使能、清错或归位。
+- 全局选项 `--site DIR` 写在子命令前，默认为 `$MANIPULATION_SITE` 或 `~/.local/share/spacemit-manipulation/site`。
+- 每种设备一个目录 `SITE/NAME/`，存放 `device.yaml`、姿态和校准文件。`SITE/device.yaml` 是指向当前设备配置的符号链接。
+- 设备类子命令默认使用当前设备，可用 `--plan FILE` 替换。
+- 所有命令都不自动使能、清错或归位。
 
 | 子命令 | 参数与说明 |
 | --- | --- |
 | `check` | `--profile build\|control\|vision`；`vision` 另检查 OpenCV、SciPy、`pyrealsense2` |
-| `configure MODEL` | `--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD`；不覆盖已有文件 |
+| `configure MODEL` | 生成 `SITE/MODEL/device.yaml` 并设为当前设备；`--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD`；不覆盖已有文件 |
+| `use [NAME]` | 把 `SITE/NAME/device.yaml` 设为当前设备；省略 `NAME` 时只列出已配置的设备，`*` 标记当前设备 |
 | `validate` / `inspect` / `capabilities` | 同 `manipulation-device` 对应子命令 |
 | `monitor` | 只读，持续打印关节角（度）、状态、末端位置、负载与抓握判断；`--rate HZ`（1–20，默认 5）、`--count N` |
 | `enable` / `disable`、`hand-enable` / `hand-disable` | 使能 / 释放扭矩；失能前须支撑机械臂并卸载物品 |
@@ -146,7 +154,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `hand-move V...` | 每个通道一个绝对位置（`0` 闭合，`1` 张开）；`--duration S`（默认 2） |
 | `hand-step CHANNEL DELTA` | 单通道 `±0.01`，仅限有位置反馈的末端 |
 | `hand-grasp` | 闭合到夹住或完全闭合，仅限声明 `grasp_detection` 的末端；`--positions V...`（默认全 0）、`--duration S`（默认 1） |
-| `teach FILE` / `fk FILE` | 记录静止姿态 / 姿态文件的正运动学；文件相对现场目录，`teach` 不覆盖 |
+| `teach FILE` / `fk FILE` | 记录静止姿态 / 姿态文件的正运动学；文件相对设备配置所在目录，`teach` 不覆盖 |
 | `pose` | 只读当前末端位姿：`position_m`、`rpy_rad`（URDF 横滚、俯仰、偏航） |
 | `ik X Y Z` | 逆解，不运动；`--rpy R P Y`、`--orientation-weight W`、`--seed-pose FILE`（离线求解）；不收敛时退出码 2 |
 | `pose-move X Y Z` | 逆解后关节点位运动；参数同 `ik`，另有 `--speed`；按控制器速度上限估算的时长超过 `timeout_s` 时不运动 |
@@ -168,17 +176,20 @@ steps:                            # 0–128 步，run 按顺序执行
 
 ### so101-calibrate
 
-`so101-calibrate [OPERATION] --port PORT`：所有操作要求舵机已释放扭矩，且从不使能扭矩。
+`so101-calibrate OPERATION --port PORT`：所有操作要求舵机已释放扭矩，且从不使能扭矩。
 
-| 操作 | 参数 | 寄存器 |
+| 操作 | 作用 | 寄存器 |
 | --- | --- | --- |
-| `capture`（默认） | `--arm-output`、`--gripper-output`：新建的行程文件 | 只读 |
-| `status` | `--part all\|arm\|gripper` | 只读 0–70 |
-| `configure` | `--part` | 写 7=0、21/22/23=16/0/0、33=0；夹爪另写 16=500、28=250、36=25 |
-| `center` | `--part` | 写 31（偏移，符号位为位 11）及 9/11=0/4095 |
-| `limits` | `--arm-calibration`、`--gripper-calibration`：采集的行程文件 | 写 9/11 |
+| `all` | 依次执行 `configure`、`center`、`capture`、`limits`；校准文件在写入限位前保存 | 同各步骤 |
+| `status` | 读取舵机状态 | 只读 0–70 |
+| `configure` | 写入推荐参数 | 写 7=0、21/22/23=16/0/0、33=0；夹爪另写 16=500、28=250、36=25 |
+| `center` | 中位校准 | 写 31（偏移，符号位为位 11）及 9/11=0/4095 |
+| `capture` | 采集行程，新建校准文件，不覆盖已有文件 | 只读 |
+| `limits` | 把校准文件中的行程写入舵机限位 | 写 9/11 |
 
-- **公共选项**：`--arm-ids`（默认 `1,2,3,4,5`）、`--gripper-id`（默认 `6`）、`--library`（默认取安装目录的 `libmanipulation_feetech_bus.so`）。
+- **校准文件**：默认为 `SITE/so101/` 中的 `so101_calibration.json`、`so101_gripper_calibration.json`，与 SO101 配置模板的默认值一致；`--arm-calibration`、`--gripper-calibration` 可改用其他文件名（相对 `SITE/so101/`）。
+- **现场目录**：`--site DIR` 指定 `SITE`，默认值与 `manipulation` 相同。
+- **公共选项**：`--part all|arm|gripper`（默认 `all`）、`--arm-ids`（默认 `1,2,3,4,5`）、`--gripper-id`（默认 `6`）、`--library`（默认取安装目录的 `libmanipulation_feetech_bus.so`）。
 - **写入方式**：只写与当前值不同的寄存器。`motor` 驱动在每次写入前后解锁（55=0）和上锁（55=1），之后逐项读回核对。
 - **`center` 的计算**：先清零偏移、读取实际位置，再写入 `偏移 = 位置 − 2047`，最后核对当前位置在 2047±3 内。
 - **`limits` 的前提**：要求舵机偏移与文件一致，且当前位置在行程内。
@@ -187,7 +198,7 @@ steps:                            # 0–128 步，run 按顺序执行
 
 | 状态 | 含义 | 之后 |
 | --- | --- | --- |
-| `succeeded` | 满足所选完成条件（见第 6 节） | 可继续 |
+| `succeeded` | 满足所选完成条件（见 [§6 完成条件](#完成条件)） | 可继续 |
 | `cancelled` | 取消后驱动确认已停止 | 可继续 |
 | `timed_out` | 超过期限，驱动确认已停止 | 锁定 |
 | `fault` | 反馈异常、控制器故障或写入失败，已确认停止 | 锁定 |
@@ -202,8 +213,7 @@ steps:                            # 0–128 步，run 按顺序执行
 ## 4. 设备独占
 
 - **资源锁**：连接时在 `/run/lock/spacemit-manipulation/<resource_id>.lock` 上加排他锁，进程退出时释放。
-  - 锁目录在构建时由 `MANIPULATION_LOCK_DIRECTORY` 指定，运行时可用同名环境变量覆盖（测试用）。
-  - 锁目录由组件创建并要求 sticky 位；本机所有程序必须使用同一目录才能互斥。
+  - 锁目录由组件自动创建并设置 sticky 位，所有使用本组件的程序共用同一目录，因而互斥。
 - **Nero**：驱动另外持有 `/tmp/nero_<channel>_control.lock`，与使用该锁的 pyAgxArm 程序互斥。
 - **SO101**：
   - 按规范化串口路径同时使用串口排他打开和文件锁，但不能撤销其他程序预先打开的串口。
@@ -235,7 +245,7 @@ steps:                            # 0–128 步，run 按顺序执行
 | `HoldArm()` / `HoldEffector()` | 保持停止，不卸力、不清除锁定 |
 | `JogArm(joint_index, delta_rad, speed_scale, cancelled)` | 基于当前位置的单关节相对点位 |
 | `MoveArm` / `MoveArmPath` / `MoveArmTrajectory` / `MoveEffector` | 阻塞执行并返回 `CommandResult`；`cancelled` 每 10 ms 调用一次 |
-| `FollowArm(point)` / `FollowEffector(point)` | 目标跟随：发出目标即返回，见第 6 节 |
+| `FollowArm(point)` / `FollowEffector(point)` | 目标跟随：发出目标即返回，见 [§6 完成条件](#完成条件) |
 | `Latched()` | 是否处于锁定 |
 
 ## 6. Python API
@@ -245,11 +255,13 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
              allow_effector_enable=False, allow_effector_disable=False)
 ```
 
-启动 `manipulation-device serve`，进程存活期间持有设备独占；`allow_motion=False` 以只读方式打开。使能、失能需对应授权；驱动不支持的操作在写入前拒绝（如 Nero / Revo2 不支持本接口的失能和末端独立使能），应先查询 `capabilities()`。
+- 启动 `manipulation-device serve`，进程存活期间持有设备独占。
+- `allow_motion=False` 以只读方式打开；使能、失能需对应授权。
+- 驱动不支持的操作在写入前拒绝，例如 Nero / Revo2 不支持本接口的失能和末端独立使能，应先查询 `capabilities()`。
 
 | 方法 | 作用 |
 | --- | --- |
-| `state()`、`diagnose()`、`capabilities()` | 状态（字段见第 2 节）、主动诊断、能力声明 |
+| `state()`、`diagnose()`、`capabilities()` | 状态（字段见 [§2 manipulation-device](#manipulation-device)）、主动诊断、能力声明 |
 | `enable_arm()` / `disable_arm()`、`enable_effector()` / `disable_effector()` | 改变使能状态 |
 | `hold_arm()` / `hold_effector()` | 保持停止，不清除已有锁定 |
 | `jog_arm(joint_index, delta_rad, speed_scale=0.05)` | 单关节相对点位 |
@@ -261,7 +273,8 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `follow_effector(positions, duration_s=0.1, allow_unverified=False)` | 末端目标跟随，发出目标即返回 |
 | `close()` | 关闭会话；也可使用 `with` |
 
-每个方法接受 `timeout`（秒，默认 10，最长 180，含排队时间）和 `is_cancelled`（回调）。运动未成功时抛出 `DeviceCommandError`：结果为含 `status` 的字典，设备进程拒绝请求时为错误字符串。
+- 每个方法接受 `timeout`（秒，默认 10，最长 180，含排队时间）和 `is_cancelled`（回调）。
+- 运动未成功时抛出 `DeviceCommandError`：结果为含 `status` 的字典；设备进程拒绝请求时为错误字符串。
 
 ### 完成条件
 
@@ -308,6 +321,6 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `jacobian(model, joints_rad)` | 末端位姿与 6×N 几何雅可比（线速度行在前，基座坐标系） |
 
 - **姿态权重**：`orientation_weight` 为 0 时只求位置，为 1 时位置与姿态同等加权。
-- **收敛门槛**：位置 0.5 mm、姿态 0.01 rad，最多 200 次迭代；阻尼、步长和单步上限沿用原 `manipulator` 组件。
+- **收敛门槛**：位置 0.5 mm、姿态 0.01 rad，最多 200 次迭代；阻尼 1e-4，步长从 0.5 减半到 0.01，单步关节变化不超过 0.5 rad。
 - **限位**：`limits` 为配置中的 `[下限, 上限]`，与 URDF 限位取交集。
 - **未收敛结果**：`converged` 为 `false` 时只是最优近似，不能作为运动目标。

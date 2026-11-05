@@ -32,7 +32,28 @@ manipulation demo
 
 执行两轴机械臂和六通道末端的模拟点位任务，不连接硬件。
 
-## 3. 连接 Nero
+## 3. 现场目录与当前设备
+
+真机配置保存在现场目录 `SITE`（默认 `~/.local/share/spacemit-manipulation/site/`），每种设备一个子目录，存放该设备的配置、姿态和校准文件：
+
+```text
+SITE/
+├── nero/device.yaml
+├── so101/device.yaml
+├── so101/so101_calibration.json
+└── device.yaml -> nero/device.yaml    # 当前设备
+```
+
+`configure` 生成配置后，会把该设备设为当前设备；其他命令默认控制当前设备，不需要重复指定。
+
+```bash
+manipulation use          # 列出已配置的设备，* 标记当前设备
+manipulation use so101    # 切换当前设备
+```
+
+单条命令可用 `--plan FILE` 改用其他配置。
+
+## 4. 连接 Nero
 
 Nero 经 SocketCAN USB-CAN 适配器以 1 Mbps 连接主机；Revo2 右手接在机械臂末端口，与机械臂共用连接。退出厂商 Web、遥操等其他控制程序后执行：
 
@@ -44,43 +65,45 @@ manipulation teach pose_01.json
 manipulation hand-move 1 1 0.7 1 1 1
 ```
 
-- **现场目录**：配置保存到 `SITE/device.yaml`，已有文件不覆盖。`SITE` 默认为 `~/.local/share/spacemit-manipulation/site/`，可用 `MANIPULATION_SITE` 或子命令前的 `--site DIR` 指定。
+- **配置**：保存到 `SITE/nero/device.yaml`，已有文件不覆盖。
 - **只读命令**：`inspect` 读取状态，`teach` 记录静止姿态，都不运动。
-- **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出位置（`0` 闭合、`1` 张开，所有末端相同），默认执行 2 s。Revo2 没有位置反馈，结果为 `unverified`（已下发并等完执行时间，未测量是否到位），起点未知时可能大幅动作。
+- **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出位置，默认执行 2 s。
+  - 位置 `0` 闭合、`1` 张开，所有末端相同；
+  - Revo2 没有位置反馈，结果为 `unverified`，表示已下发并等完执行时间，但未测量是否到位；
+  - 起点未知，即使目标数值很小也可能大幅动作。
 
 机械臂须按厂商规程使能并处于位置模式。现场须有人看护、急停可达。Nero 失能或断电会坍塌，不以失能或断电代替软件停止。
 
-## 4. 连接 SO101
+## 5. 连接 SO101
 
 五个关节舵机为 ID 1–5，夹爪为 ID 6，共用 USB 串口（1 Mbps）。账号须属于 `dialout` 组，并退出 LeRobot 等串口程序。
 
 ### 校准舵机
 
-已有原 `manipulator` / `grasp` 的 `so101_calibration.json`、`so101_gripper_calibration.json` 时，放入现场目录即可跳过。新装或重新装配时，先支撑机械臂、清空夹爪并释放扭矩，再执行：
+SO101 使用通用舵机，首次使用前需要校准；已有本机的 `so101_calibration.json`、`so101_gripper_calibration.json` 时，放入 `SITE/so101/` 即可跳过。新装或重新装配时，先支撑机械臂、清空夹爪并释放扭矩，再执行：
 
 ```bash
-export MANIPULATION_SITE="$PWD/site/so101" && mkdir -p "$MANIPULATION_SITE"
-so101-calibrate --port /dev/ttyACM0 status       # 只读，每个舵机一行 JSON
-so101-calibrate --port /dev/ttyACM0 configure    # 推荐参数：PID 16/0/0、返回延迟 0、位置模式、夹爪扭矩保护
-so101-calibrate --port /dev/ttyACM0 center       # 中位校准：当前姿态设为编码器中位 2047（模型零位）
-so101-calibrate --port /dev/ttyACM0 \
-  --arm-output "$MANIPULATION_SITE/so101_calibration.json" \
-  --gripper-output "$MANIPULATION_SITE/so101_gripper_calibration.json"   # 采集行程（只读）
-so101-calibrate --port /dev/ttyACM0 limits \
-  --arm-calibration "$MANIPULATION_SITE/so101_calibration.json" \
-  --gripper-calibration "$MANIPULATION_SITE/so101_gripper_calibration.json"   # 行程写入舵机限位
+so101-calibrate --port /dev/ttyACM0 status    # 只读，每个舵机一行 JSON
+so101-calibrate --port /dev/ttyACM0 all       # 按提示完成全部标定
 ```
 
+`all` 依次执行以下步骤，需要重做某一步时也可单独执行：
+
+- `configure`：写入推荐参数，即 PID 16/0/0、返回延迟 0、位置模式和夹爪扭矩保护；
+- `center`：中位校准，把当前姿态设为编码器中位 2047（模型零位）；
+- `capture`：采集行程（只读），生成两个校准文件；
+- `limits`：把行程写入舵机限位。
+
+- **文件位置**：校准文件保存在 `SITE/so101/`，文件名与 SO101 配置模板一致，`configure` 自动引用。
 - **扭矩**：工具从不使能扭矩，任一舵机有扭矩时拒绝执行。
-- **写入方式**：只写与当前值不同的寄存器，写前解锁、写后读回并重新上锁。
-- **`center` 的影响**：执行后原有行程文件不再匹配，须重新采集。
+- **写入方式**：只写与当前值不同的寄存器，写后读回确认。
+- **`center` 的影响**：执行后原有校准文件不再匹配，须移走后重新 `capture`。
 - **部分校准**：`--part arm|gripper` 只处理机械臂或夹爪。
 
 ### 配置和控制
 
 ```bash
-manipulation configure so101 --variant gripper --set port=/dev/ttyACM0 \
-  --set arm_calibration=so101_calibration.json --set gripper_calibration=so101_gripper_calibration.json
+manipulation configure so101 --variant gripper --set port=/dev/ttyACM0   # 仅机械臂时去掉 --variant gripper
 manipulation monitor                                 # 只读，持续打印关节角、夹爪位置与负载
 manipulation enable && manipulation hand-enable
 manipulation joint-step shoulder_pan 0.05 --speed 0.2
@@ -91,15 +114,21 @@ manipulation line-move 0.20 0.05 0.15 --speed 0.2   # 末端沿直线移动
 ```
 
 - **监控与示教**：`monitor` 只读，释放扭矩时可手动拖动机械臂观察读数，再用 `teach` 记录姿态。中位姿态下各关节应接近 0°。
-- **抓握判断**：夹爪闭合途中受阻停下，且负载不低于 `grip_load_threshold`（默认额定输出的 10%）时，结果为 `effector_grasp_holding`；完全闭合为空夹。负载判断不是力觉测量，首次抓取新物体时须在旁观察。
+- **抓握判断**：
+  - 夹爪闭合途中受阻停下，且负载不低于 `grip_load_threshold`（默认额定输出的 10%）：结果为 `effector_grasp_holding`；
+  - 完全闭合：空夹；
+  - 负载判断不是力觉测量，首次抓取新物体时须在旁观察。
 - **夹爪使能与保持**：夹爪须先由 `configure` 设好扭矩保护，否则拒绝使能。夹住后 `hand-hold` 不会松开。
 - **速度与超时**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`pose-move` 估算的时长超过 `timeout_s` 时在运动前拒绝。
 - **逆运动学**：五轴机械臂默认只求位置，加 `--rpy R P Y` 同时求姿态。不收敛时不运动；只检查关节限位，不检查碰撞。
 - **直线运动**：`line-move` 按 5 mm 间隔逐点求解，任一路点不可达时整条拒绝。SO101 不支持连续路径和定时轨迹。
 
-## 5. 手眼标定
+## 6. 手眼标定
 
-眼在手外：相机固定，ChArUco 标定板装在法兰上，结果 `T_base_camera` 把相机坐标换算到机械臂基座。需要 OpenCV（`sudo apt install libopencv-dev python3-opencv` 后重新 `mm`）和与 Python 版本匹配的 `pyrealsense2`。
+眼在手外：相机固定，ChArUco 标定板装在法兰上，结果 `T_base_camera` 把相机坐标换算到机械臂基座。
+
+- 需要 OpenCV：执行 `sudo apt install libopencv-dev python3-opencv` 后重新 `mm`；
+- 需要与 Python 版本匹配的 `pyrealsense2`。
 
 ```bash
 hand-eye collect cal_01 --option board=board.json   # 摆好姿态并静止后输入 CAPTURE 采样
@@ -110,7 +139,7 @@ hand-eye export cal_01                              # 导出 extrinsic.json
 
 `board.json` 按实物填写标定板参数，例如 `{"type": "charuco", "dictionary": "4x4_50", "squares_x": 5, "squares_y": 7, "square_length_m": 0.025, "marker_length_m": 0.018}`。采集工具不移动机械臂，结果保存在现场目录且不覆盖已有文件。
 
-## 6. 在程序中使用
+## 7. 在程序中使用
 
 **Python**（`source build/envsetup.sh` 后可直接导入）：
 
@@ -162,7 +191,7 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 
 **YAML 点位任务**：在设备配置的 `steps` 中写顺序动作，用 `manipulation-device run` 执行，示例见 [examples/point_sequence](examples/point_sequence/README.md)。
 
-## 7. 新增驱动
+## 8. 新增驱动
 
 1. 实现 `Arm`，有末端时实现 `EndEffector`，参考 `examples/bench_driver/bench_driver.cpp`。
 2. 在模块的 `CMakeLists.txt` 中登记：
@@ -175,9 +204,9 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 
 不需要修改公共头文件或已有驱动。驱动约定见[开发指南](docs/development.md)。
 
-## 8. 使用限制
+## 9. 使用限制
 
-- **抓稳判断**：位置到位不代表实物已抓稳。只有 SO101 夹爪按负载判断是否夹住，没有力觉或触觉测量。
+- **抓稳判断**：位置到位不代表实物已抓稳。声明 `grasp_detection` 的末端按负载判断是否夹住，这不是力觉或触觉测量。
 - **软件停止**：Ctrl+C 请求软件保持，不是急停，现场以急停为准。
 - **设备独占**：只约束本机使用同一锁机制的程序，不约束厂商 Web 或其他主机。
 - **无反馈末端**：开环执行；取消或中断后结果为 `stop_unknown`，须现场检查后重新连接。
@@ -190,7 +219,7 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 include/manipulation/   C++ 公共接口
 core/                   设备会话：独占、执行、到位判定、故障锁定
 runtime/                配置解析与点位任务
-drivers/                Mock、Nero、Revo2、SO101 及夹爪驱动
+drivers/                各型号驱动与 Mock
 capabilities/           运动、诊断、运动学、标定及其命令行
 bindings/python/        Python 接口
 descriptions/           机型描述：URDF、model.json、配置模板

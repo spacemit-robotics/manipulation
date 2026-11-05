@@ -461,9 +461,13 @@ class BusTests(unittest.TestCase):
             self.bus.registers[motor_id][40] = 0
             self.bus.registers[motor_id][21] = 16
 
-    def tool(self, *arguments):
-        return subprocess.run([sys.executable, str(CALIBRATE), *arguments, "--port", self.bus.port, "--library", LIBRARY],
-                              text=True, capture_output=True, timeout=20)
+    def tool(self, *arguments, site=None):
+        if site is None:
+            temporary = tempfile.TemporaryDirectory(prefix="so101-site-")
+            self.addCleanup(temporary.cleanup)
+            site = temporary.name
+        return subprocess.run([sys.executable, str(CALIBRATE), *arguments, "--port", self.bus.port, "--library", LIBRARY,
+                               "--site", str(site)], text=True, capture_output=True, timeout=20)
 
     def test_status_keeps_stdout_machine_readable_and_never_writes(self):
         result = self.tool("status")
@@ -483,6 +487,35 @@ class BusTests(unittest.TestCase):
         self.bus.writes.clear()
         self.assertEqual(self.tool("configure", "--part", "arm").returncode, 0)
         self.assertEqual(self.bus.writes, [])
+
+    def test_limits_read_the_site_files_the_device_templates_name(self):
+        with tempfile.TemporaryDirectory(prefix="so101-site-") as site:
+            missing = self.tool("limits", site=site)
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("so101-calibrate capture", missing.stderr)
+            arm = {name: dict(id=index + 1, homing_offset=0, range_min=1000, range_max=3000)
+                   for index, name in enumerate(JOINTS)}
+            (Path(site) / "so101").mkdir()
+            (Path(site) / "so101/so101_calibration.json").write_text(json.dumps(arm))
+            (Path(site) / "so101/so101_gripper_calibration.json").write_text(
+                json.dumps(dict(motor_id=6, open_ticks=3400, closed_ticks=2000, homing_offset=0)))
+            result = self.tool("limits", site=site)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([(self.bus.registers[i][9:11], self.bus.registers[i][11:13]) for i in (1, 6)],
+                         [((1000).to_bytes(2, "little"), (3000).to_bytes(2, "little")),
+                          ((2000).to_bytes(2, "little"), (3400).to_bytes(2, "little"))])
+
+    def test_capture_and_all_keep_an_existing_site_file_without_bus_traffic(self):
+        for operation in ("capture", "all"):
+            with self.subTest(operation=operation), tempfile.TemporaryDirectory(prefix="so101-site-") as site:
+                (Path(site) / "so101").mkdir()
+                (Path(site) / "so101/so101_gripper_calibration.json").write_text("{}")
+                result = self.tool(operation, site=site)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("existing calibration kept", result.stderr)
+                self.assertEqual((Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}")
+                self.assertFalse((Path(site) / "so101/so101_calibration.json").exists())
+        self.assertEqual(self.bus.requests, [])
 
     def test_lost_write_is_reported_though_the_servo_acknowledged_it(self):
         self.bus.drop_goals = True

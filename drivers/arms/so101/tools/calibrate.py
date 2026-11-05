@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 # SPDX-License-Identifier: Apache-2.0
-"""SO101 servo setup with torque released: travel capture (default), register status, parameter
-configuration, mid-position (homing offset) calibration and servo limits. Never enables torque.
+"""SO101 servo setup with torque released: register status, parameter configuration, mid-position
+(homing offset) calibration, travel capture and servo limits, or all of them in order. Never enables torque.
+
+The calibration files live in SITE/so101/, beside the SO101 device configuration that
+`manipulation configure so101` creates there, under the names its templates use.
 
 Only configure, center and limits write servo EEPROM: the motor driver unlocks and relocks it around
 each value, which is then read back; values already equal are not written.
@@ -17,8 +20,9 @@ import time
 
 JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
 MIDDLE = 2047  # Encoder ticks of the model zero pose (0 rad) after center.
+ARM_FILE, GRIPPER_FILE = "so101_calibration.json", "so101_gripper_calibration.json"
 LOCK = 55  # Reported by status; the motor driver handles the EEPROM lock around writes.
-# (address, length, value) recommended by the former manipulator and grasp components (LeRobot values):
+# (address, length, value) recommended for the SO101 (LeRobot's values):
 # return delay 0, P 16, D 0, I 0, position mode; the gripper also limits torque and current.
 ARM_PARAMETERS = ((7, 1, 0), (21, 1, 16), (22, 1, 0), (23, 1, 0), (33, 1, 0))
 GRIPPER_PARAMETERS = ARM_PARAMETERS + ((16, 2, 500), (28, 2, 250), (36, 1, 25))
@@ -207,6 +211,20 @@ def limits(bus, arm, gripper):
             for motor_id, _, minimum, maximum in ranges}
 
 
+def calibrate_all(bus, arm_ids, gripper_id, save, prompt=input, settle_s=0.1):
+    """configure, center, capture and limits in order: the full setup of a new or reassembled arm.
+
+    save(arm, gripper) stores the captured travel before it is written as servo limits.
+    """
+    ids = list(arm_ids) + ([gripper_id] if gripper_id is not None else [])
+    configure(bus, arm_ids, gripper_id)
+    center(bus, ids, prompt, settle_s)
+    arm, gripper = capture(bus, arm_ids, gripper_id, prompt)
+    save(arm, gripper)
+    limits(bus, arm, gripper)
+    return arm, gripper
+
+
 def capture(bus, arm_ids, gripper_id, prompt=input):
     """Capture two operator-selected endpoints per channel; leave servo configuration unchanged."""
     ids = list(arm_ids) + ([gripper_id] if gripper_id is not None else [])
@@ -252,49 +270,61 @@ def save_new(path, value):
     print(f"saved {path}")
 
 
+def default_site():
+    """As the manipulation command: MANIPULATION_SITE, otherwise the user data directory."""
+    if os.environ.get("MANIPULATION_SITE"):
+        return os.environ["MANIPULATION_SITE"]
+    data = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")
+    return str(Path(data) / "spacemit-manipulation/site")
+
+
 def load_calibration(path):
-    return json.loads(Path(path).read_text(encoding="utf-8")) if path else None
+    if not path.is_file():
+        raise FileNotFoundError(f"{path} not found; run `so101-calibrate capture` first, or choose --part")
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("operation", nargs="?", default="capture",
-                        choices=("capture", "status", "configure", "center", "limits"),
-                        help="capture travel to new files (default); status reads registers; configure writes "
-                             "recommended parameters; center sets the homing offsets; limits installs captured "
-                             "travel as servo limits")
+    parser.add_argument("operation", choices=("all", "status", "configure", "center", "capture", "limits"),
+                        help="all runs configure, center, capture and limits in order; status reads registers; "
+                             "configure writes recommended parameters; center sets the homing offsets; capture "
+                             "records travel to new calibration files; limits installs the captured travel as "
+                             "servo limits")
     parser.add_argument("--port", required=True, help="SO101 serial device, preferably /dev/serial/by-id/...")
-    parser.add_argument("--arm-output", type=Path, help="capture: new arm calibration JSON file")
-    parser.add_argument("--gripper-output", type=Path, help="capture: new gripper calibration JSON file")
-    parser.add_argument("--arm-calibration", type=Path, help="limits: captured arm calibration")
-    parser.add_argument("--gripper-calibration", type=Path, help="limits: captured gripper calibration")
+    parser.add_argument("--site", default=default_site(),
+                        help="site directory; the calibration files are in its so101/ subdirectory "
+                             "(default: $MANIPULATION_SITE or ~/.local/share/spacemit-manipulation/site)")
+    parser.add_argument("--part", choices=("all", "arm", "gripper"), default="all",
+                        help="servos to use (default all)")
+    parser.add_argument("--arm-calibration", default=ARM_FILE,
+                        help=f"arm calibration file, relative to SITE/so101 (default {ARM_FILE})")
+    parser.add_argument("--gripper-calibration", default=GRIPPER_FILE,
+                        help=f"gripper calibration file, relative to SITE/so101 (default {GRIPPER_FILE})")
     parser.add_argument("--arm-ids", default="1,2,3,4,5")
     parser.add_argument("--gripper-id", type=int, default=6)
-    parser.add_argument("--part", choices=("all", "arm", "gripper"), default="all",
-                        help="status, configure, center: servos to use (default all)")
     parser.add_argument("--library", help="explicit libmanipulation_feetech_bus.so path")
     args = parser.parse_args()
+    site = Path(args.site).expanduser().absolute() / "so101"
+    files = dict(arm=site / args.arm_calibration, gripper=site / args.gripper_calibration)
+    parts = [part for part in ("arm", "gripper") if args.part in ("all", part)]
     arm_ids = [int(item) for item in args.arm_ids.split(",")]
     if len(arm_ids) != len(JOINTS):
         raise ValueError("--arm-ids requires five IDs in joint order")
-    if args.operation == "capture":
-        outputs = [path.absolute() for path in (args.arm_output, args.gripper_output) if path is not None]
-        if not outputs or len(set(outputs)) != len(outputs):
-            raise ValueError("specify distinct --arm-output and/or --gripper-output files")
-        for path in outputs:
-            if os.path.lexists(path):
-                raise FileExistsError(f"existing calibration kept: {path}")
-        arm_ids = arm_ids if args.arm_output else []
-        gripper_id = args.gripper_id if args.gripper_output else None
-    elif args.operation == "limits":
-        arm, gripper = load_calibration(args.arm_calibration), load_calibration(args.gripper_calibration)
-        if not arm and not gripper:
-            raise ValueError("specify --arm-calibration and/or --gripper-calibration")
+    if args.operation == "limits":
+        arm = load_calibration(files["arm"]) if "arm" in parts else None
+        gripper = load_calibration(files["gripper"]) if "gripper" in parts else None
         arm_ids = [arm[name]["id"] for name in JOINTS] if arm else []
         gripper_id = gripper["motor_id"] if gripper else None
     else:
-        arm_ids = arm_ids if args.part != "gripper" else []
-        gripper_id = args.gripper_id if args.part != "arm" else None
+        if args.operation in ("all", "capture"):
+            if "arm" in parts and "gripper" in parts and files["arm"] == files["gripper"]:
+                raise ValueError("arm and gripper calibration files must differ")
+            for part in parts:
+                if os.path.lexists(files[part]):
+                    raise FileExistsError(f"existing calibration kept: {files[part]}; move it aside to capture again")
+        arm_ids = arm_ids if "arm" in parts else []
+        gripper_id = args.gripper_id if "gripper" in parts else None
     ids = arm_ids + ([gripper_id] if gripper_id is not None else [])
     if len(set(ids)) != len(ids) or any(not 1 <= value <= 253 for value in ids):
         raise ValueError("servo IDs must be distinct integers in 1..253")
@@ -302,12 +332,24 @@ def main():
         print("Travel capture preserves the current homing offsets: run `so101-calibrate center` first on a new\n"
               "or reassembled arm. Support the arm, remove loads, and release torque using the device\n"
               "procedure before starting. This operation only reads servo registers.")
+    elif args.operation == "all":
+        print("Full setup: parameters, mid position, travel and servo limits. Support the arm, remove loads,\n"
+              "and release torque before starting; this tool never enables torque.")
     elif args.operation != "status":
         print("Torque must already be released with the arm supported; this tool never enables torque.")
+    def save(arm, gripper):
+        if arm_ids:
+            save_new(files["arm"], arm)
+        if gripper_id is not None:
+            save_new(files["gripper"], gripper)
+
     bus = RegisterBus(library_path(args.library), args.port, ids)
     try:
-        if args.operation == "capture":
-            arm, gripper = capture(bus, arm_ids, gripper_id)
+        if args.operation == "all":
+            calibrate_all(bus, arm_ids, gripper_id, save)
+            print("Calibration complete: parameters, mid position, travel and servo limits.")
+        elif args.operation == "capture":
+            save(*capture(bus, arm_ids, gripper_id))
         elif args.operation == "status":
             for motor_id, values in status(bus, ids).items():
                 print(json.dumps(dict(id=motor_id, **values)))
@@ -324,11 +366,6 @@ def main():
                 print(f"servo {motor_id}: " + ("limits written" if written else "limits unchanged"))
     finally:
         bus.close()
-    if args.operation == "capture":
-        if arm_ids:
-            save_new(args.arm_output, arm)
-        if gripper_id is not None:
-            save_new(args.gripper_output, gripper)
 
 
 if __name__ == "__main__":

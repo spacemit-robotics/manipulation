@@ -1,8 +1,7 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // One calibrated gripper channel: 0 closed, 1 open, in either encoder direction. A closing move that
-// stops short of its target under load (grip_load_threshold) reports holding, as the former grasp
-// component's HOLDING state did.
+// stops short of its target under load (grip_load_threshold) reports holding.
 #include "so101_session.h"
 
 #include <algorithm>

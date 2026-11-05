@@ -57,7 +57,8 @@ def configure(prefix, model, output, variant="arm", values=None, python="python3
         raise ValueError(f"this installation does not include driver {driver.group(1) if driver else '?'}; "
                          "rebuild with the matching driver module enabled")
     if output.exists():
-        raise FileExistsError(f"{output} already exists; review or remove it before configuring again")
+        raise FileExistsError(f"{output} already exists; select it with `manipulation use {model}`, "
+                              "or move it aside to configure again")
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("x", encoding="utf-8") as stream:
         stream.write(content)
