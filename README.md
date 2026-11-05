@@ -152,7 +152,7 @@ with DeviceClient("manipulation-device", "examples/mock_device.yaml") as arm:
     arm.move_effector([0.5] * 6, duration_s=0.5)
 ```
 
-- **失败处理**：运动失败时抛出 `DeviceCommandError`，`result` 字段含结果状态。
+- **失败处理**：运动失败时抛出 `DeviceCommandError`，`result` 字段含结果状态；`rejected` 表示请求未写入设备，`latched` 表示会话已锁定。
 - **目标跟随**：遥操作、视觉伺服等高频更新目标时用 `follow_arm()` / `follow_effector()`，发出目标即返回，结束时调用 `hold_arm()` 或 `move_arm()`。
 - **无反馈末端**：结果为 `unverified`，须传 `allow_unverified=True` 才接受。
 

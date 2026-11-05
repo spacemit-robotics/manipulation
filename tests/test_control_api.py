@@ -276,6 +276,26 @@ class ControlApiTests(unittest.TestCase):
                         client_type.return_value.__enter__.return_value, method
                     ).assert_called_once_with()
 
+    def test_errors_say_whether_anything_was_written_and_the_session_latched(self):
+        with DeviceClient(CLI, self.filename) as client:
+            self.assertFalse(client.state()["latched"])
+            with self.assertRaises(DeviceCommandError) as raised:
+                client.move_effector([0.5], duration_s=6)  # Longer than the effector timeout_s.
+            self.assertTrue(raised.exception.rejected)
+            self.assertFalse(raised.exception.latched)
+            self.assertIn("timeout_s", str(raised.exception))
+            self.assertFalse(client.state()["latched"])
+            self.assertEqual(client.move_effector([0.5], duration_s=0.2)["status"], "succeeded")
+
+    def test_inspect_prints_the_state_fields(self):
+        with DeviceClient(CLI, self.filename, allow_motion=False) as client:
+            state = client.state()
+        result = self.cli("inspect")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        printed = json.loads(result.stdout.splitlines()[-1])
+        self.assertEqual(set(printed), set(state))
+        self.assertIs(printed["enabled"], True)
+
     def test_follow_sends_each_target_without_waiting_and_keeps_every_check(self):
         with DeviceClient(CLI, self.filename, allow_effector_disable=True) as client:
             for step in range(1, 6):

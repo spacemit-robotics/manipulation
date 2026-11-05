@@ -21,34 +21,7 @@ void Signal(int) {
 }
 
 void Print(spacemit::manipulation::DeviceSession& session) {
-    const auto arm = session.ReadArm();
-    std::cout << std::setprecision(12) << "{\"firmware\":" << JsonString(arm.firmware)
-              << ",\"enabled\":" << arm.enabled << ",\"position_mode\":" << arm.position_mode
-              << ",\"moving\":" << arm.moving << ",\"fault\":" << arm.fault << ",\"joints_rad\":[";
-    for (std::size_t i = 0; i < arm.joints_rad.size(); ++i) {
-        if (i) std::cout << ',';
-        std::cout << arm.joints_rad[i];
-    }
-    std::cout << ']';
-    if (session.HasEffector()) {
-        const auto hand = session.ReadEffector();
-        const bool measured = session.Definition().effector.feedback ==
-                              spacemit::manipulation::EffectorFeedback::kPosition;
-        std::cout << ",\"effector_feedback\":\"" << (measured ? "position" : "none")
-                  << "\",\"effector_positions\":[";
-        for (std::size_t i = 0; i < hand.positions.size(); ++i) {
-            if (i) std::cout << ',';
-            std::cout << hand.positions[i];
-        }
-        std::cout << "],\"effector_fault\":" << hand.fault << ",\"effector_enabled\":"
-                  << (hand.enabled.has_value() ? (*hand.enabled ? "true" : "false") : "null")
-                  << ",\"effector_loads\":[";
-        for (std::size_t i = 0; i < hand.loads.size(); ++i)
-            std::cout << (i ? "," : "") << hand.loads[i];
-        std::cout << "],\"effector_holding\":"
-                  << (hand.holding.has_value() ? (*hand.holding ? "true" : "false") : "null");
-    }
-    std::cout << "}\n";
+    std::cout << DeviceStateJson(session) << '\n';
 }
 }  // namespace
 

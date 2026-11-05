@@ -125,17 +125,19 @@ steps:                            # 0–128 步，run 按顺序执行
 
 `run` 最后一行是汇总结果，形如 `{"status":"succeeded","physical_grip_verified":false}`。
 
-**状态字段**（`inspect` 输出，Python `state()` 字段相同）：
+**状态字段**（`inspect` 输出与 Python `state()` 返回同一份 JSON）：
 
 | 字段 | 含义 |
 | --- | --- |
-| `enabled`、`position_mode`、`moving`、`fault` | 机械臂使能、位置模式、实际运动、故障 |
+| `enabled`、`position_mode`、`moving`、`fault` | 机械臂使能、位置模式、实际运动、故障（`true` / `false`） |
+| `latched` | 会话是否已锁定，锁定后须重新连接 |
 | `joints_rad` | 关节位置，按配置顺序 |
 | `effector_feedback` / `effector_positions` | 末端反馈类型 / 各通道位置（`0` 闭合，`1` 张开）；`none` 时位置为空数组 |
 | `effector_enabled` | `true`、`false`，驱动无法读回时为 `null` |
 | `effector_loads` | 各通道负载 `[-1,1]`（额定输出的比例，符号为驱动方向），不提供时为空数组 |
 | `effector_holding` | 抓握判断；仅声明 `grasp_detection` 的末端给出 `true` / `false`，其他为 `null` |
 | `controller_limits` | 控制器报告的各关节位置、速度、加速度限制（驱动提供时） |
+| `firmware`、`arm_sample_id`、`source_time_s` | 固件信息、反馈样本序号、设备时间戳 |
 
 ### manipulation / hand-eye
 
@@ -280,7 +282,7 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `close()` | 关闭会话；也可使用 `with` |
 
 - 每个方法接受 `timeout`（秒，默认 10，最长 180，含排队时间）和 `is_cancelled`（回调）。
-- 运动未成功时抛出 `DeviceCommandError`：结果为含 `status` 的字典；设备进程拒绝请求时为错误字符串。
+- 运动未成功时抛出 `DeviceCommandError`：`result` 为含 `status` 的字典；设备进程拒绝请求时为错误字符串，此时 `rejected` 表示请求在写入设备前被拒绝，`latched` 表示会话已锁定、须重新连接。
 
 ### 完成条件
 

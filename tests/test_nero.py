@@ -467,8 +467,8 @@ class NeroIntegrationTests(unittest.TestCase):
 
     def test_controller_and_motor_errors_prevent_motion(self):
         for channel, marker in (
-            ("can_armfault", '"fault":1'),
-            ("can_motorfault", '"fault":1'),
+            ("can_armfault", '"fault":true'),
+            ("can_motorfault", '"fault":true'),
             ("can_badmode", "position mode"),
         ):
             with self.subTest(channel=channel):

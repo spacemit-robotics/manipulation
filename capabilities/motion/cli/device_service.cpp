@@ -100,6 +100,34 @@ std::string DeviceCapabilitiesJson(const m::DeviceSession& session) {
     return out.str() + '}';
 }
 
+std::string DeviceStateJson(m::DeviceSession& session) {
+    const auto arm = session.ReadArm();
+    std::string data = "{\"joints_rad\":" + Values(arm.joints_rad) +
+                       ",\"enabled\":" + (arm.enabled ? "true" : "false") +
+                       ",\"position_mode\":" + (arm.position_mode ? "true" : "false") +
+                       ",\"moving\":" + (arm.moving ? "true" : "false") +
+                       ",\"fault\":" + (arm.fault ? "true" : "false") +
+                       ",\"latched\":" + (session.Latched() ? "true" : "false") +
+                       ",\"firmware\":" + Quote(arm.firmware) +
+                       ",\"arm_sample_id\":" + std::to_string(arm.sample_id) +
+                       ",\"source_time_s\":" + std::to_string(arm.source_time_s);
+    if (!arm.controller_limits.empty())
+        data += ",\"controller_limits\":" + Limits(arm.controller_limits);
+    if (session.HasEffector()) {
+        const auto tool = session.ReadEffector();
+        const bool measured =
+                session.Definition().effector.feedback == m::EffectorFeedback::kPosition;
+        data += ",\"effector_feedback\":" + Quote(measured ? "position" : "none") +
+                ",\"effector_positions\":" + Values(tool.positions) +
+                ",\"effector_fault\":" + (tool.fault ? "true" : "false") +
+                ",\"effector_enabled\":" +
+                (tool.enabled.has_value() ? (*tool.enabled ? "true" : "false") : "null") +
+                ",\"effector_loads\":" + Values(tool.loads) + ",\"effector_holding\":" +
+                (tool.holding.has_value() ? (*tool.holding ? "true" : "false") : "null");
+    }
+    return data + '}';
+}
+
 int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                 const std::function<bool()>& interrupted, const std::string& driver,
                 bool allow_disable, bool allow_effector_enable, bool allow_effector_disable) {
@@ -108,16 +136,23 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
     std::deque<YAML::Node> pending;
     std::atomic<bool> stopped{false};
     std::atomic<std::uint64_t> cancelled{0}, active{0};
-    auto reply = [&](std::uint64_t id, bool ok, const std::string& data) {
+    auto reply = [&](std::uint64_t id, bool ok, const std::string& data,
+                     const std::string& extra = "") {
         std::lock_guard<std::mutex> guard(output_mutex);
         std::cout << "{\"v\":1,\"id\":" << id << ",\"ok\":" << (ok ? "true" : "false")
-                  << (ok ? ",\"data\":" : ",\"error\":") << data << "}\n"
+                  << (ok ? ",\"data\":" : ",\"error\":") << data << extra << "}\n"
                   << std::flush;
         if (!std::cout) {
             stopped = true;
             cancelled = active.load();
             changed.notify_one();
         }
+    };
+    // rejected: refused before anything was written. latched: the session needs a reconnect.
+    auto fail = [&](std::uint64_t id, const std::string& message, bool rejected) {
+        reply(id, false, Quote(message),
+              std::string(",\"rejected\":") + (rejected ? "true" : "false") +
+                      ",\"latched\":" + (session.Latched() ? "true" : "false"));
     };
     std::cout << "{\"v\":1,\"event\":\"ready\",\"motion_allowed\":"
               << (allow_motion ? "true" : "false") << ",\"driver\":" << Quote(driver) << "}\n"
@@ -230,32 +265,7 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                 data = DeviceCapabilitiesJson(session);
             } else if (op == "state" || op == "diagnose") {
                 if (op == "diagnose") session.Diagnose();
-                const auto arm = session.ReadArm();
-                data = "{\"joints_rad\":" + Values(arm.joints_rad) +
-                       ",\"enabled\":" + (arm.enabled ? "true" : "false") +
-                       ",\"position_mode\":" + (arm.position_mode ? "true" : "false") +
-                       ",\"moving\":" + (arm.moving ? "true" : "false") +
-                       ",\"fault\":" + (arm.fault ? "true" : "false") +
-                       ",\"firmware\":" + Quote(arm.firmware) +
-                       ",\"arm_sample_id\":" + std::to_string(arm.sample_id) +
-                       ",\"source_time_s\":" + std::to_string(arm.source_time_s);
-                if (!arm.controller_limits.empty())
-                    data += ",\"controller_limits\":" + Limits(arm.controller_limits);
-                if (session.HasEffector()) {
-                    const auto tool = session.ReadEffector();
-                    const bool measured = session.Definition().effector.feedback ==
-                                          m::EffectorFeedback::kPosition;
-                    data += ",\"effector_feedback\":" + Quote(measured ? "position" : "none") +
-                            ",\"effector_positions\":" + Values(tool.positions) +
-                            ",\"effector_fault\":" + (tool.fault ? "true" : "false") +
-                            ",\"effector_enabled\":" +
-                            (tool.enabled.has_value() ? (*tool.enabled ? "true" : "false")
-                                                      : "null") +
-                            ",\"effector_loads\":" + Values(tool.loads) + ",\"effector_holding\":" +
-                            (tool.holding.has_value() ? (*tool.holding ? "true" : "false")
-                                                      : "null");
-                }
-                data += '}';
+                data = DeviceStateJson(session);
             } else {
                 const bool holding = op == "arm_hold" || op == "effector_hold";
                 if (!allow_motion || (deadline_latched && !holding)) {
@@ -362,8 +372,10 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                 throw std::runtime_error("deadline exceeded; do not replay or infer physical stop");
             }
             reply(id, true, data);
+        } catch (const m::CommandRejected& error) {
+            fail(id, error.what(), true);
         } catch (const std::exception& error) {
-            reply(id, false, Quote(error.what()));
+            fail(id, error.what(), false);
         }
         active = 0;
     }

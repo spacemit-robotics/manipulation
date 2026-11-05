@@ -5,6 +5,8 @@
 #include "manipulation/device.h"
 // Quoted, escaped JSON string literal.
 std::string JsonString(const std::string& text);
+// Current arm and end-effector state, as `inspect` prints it and `state` returns it.
+std::string DeviceStateJson(spacemit::manipulation::DeviceSession& session);
 // Offline driver capabilities; no device connection or write.
 std::string DeviceCapabilitiesJson(const spacemit::manipulation::DeviceSession& session);
 int ServeDevice(spacemit::manipulation::DeviceSession& session, bool allow_motion,

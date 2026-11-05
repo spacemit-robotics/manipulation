@@ -10,8 +10,10 @@ import time
 class DeviceCommandError(RuntimeError):
     """The structured control result, including stop_unknown, is retained for applications."""
 
-    def __init__(self, result):
+    def __init__(self, result, *, rejected=False, latched=False):
         self.result = result
+        self.rejected = rejected  # Refused before anything was written to the device.
+        self.latched = latched  # The device session is latched until it reconnects.
         super().__init__(str(result))
 
 
@@ -150,7 +152,11 @@ class DeviceClient:
                     if response is not None:
                         self._pending.discard(identifier)
                         if not response["ok"]:
-                            raise DeviceCommandError(response["error"])
+                            raise DeviceCommandError(
+                                response["error"],
+                                rejected=response.get("rejected", False),
+                                latched=response.get("latched", False),
+                            )
                         return response["data"]
                     if self._error:
                         raise DeviceCommandError({"status": "stop_unknown", "reason": self._error})
