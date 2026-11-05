@@ -182,7 +182,7 @@ steps:                            # 0–128 步，run 按顺序执行
 
 ### so101-calibrate
 
-`so101-calibrate OPERATION --port PORT`：所有操作要求舵机已释放扭矩，且从不使能扭矩。
+`so101-calibrate OPERATION --port PORT`：除 `status` 外，所有操作要求舵机已释放扭矩；工具从不使能扭矩。
 
 | 操作 | 作用 | 寄存器 |
 | --- | --- | --- |

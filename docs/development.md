@@ -88,6 +88,7 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 - `motor_alloc_uart` 打开串口，`motor_get_paras` / `motor_set_paras` 读写寄存器；
 - 不调用 `motor_init`，因为它每次连接都改写 EEPROM 中的工作模式；
 - `motor_set_paras` 不报告丢失的写入，所以每次写入后都读回确认。
+
 厂商 SDK 运行在独立 worker 进程时：
 
 - worker 只开放固定操作，不接受任意方法名。

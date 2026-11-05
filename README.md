@@ -41,6 +41,7 @@ SITE/
 ├── nero/device.yaml
 ├── so101/device.yaml
 ├── so101/so101_calibration.json
+├── so101/so101_gripper_calibration.json
 └── device.yaml -> nero/device.yaml    # 当前设备
 ```
 
@@ -95,7 +96,7 @@ so101-calibrate --port /dev/ttyACM0 all       # 按提示完成全部标定
 - `limits`：把行程写入舵机限位。
 
 - **文件位置**：校准文件保存在 `SITE/so101/`，文件名与 SO101 配置模板一致，`configure` 自动引用。
-- **扭矩**：工具从不使能扭矩，任一舵机有扭矩时拒绝执行。
+- **扭矩**：工具从不使能扭矩；除 `status` 外，任一舵机有扭矩时拒绝执行。
 - **写入方式**：只写与当前值不同的寄存器，写后读回确认。
 - **`center` 的影响**：执行后原有校准文件不再匹配，须移走后重新 `capture`。
 - **部分校准**：`--part arm|gripper` 只处理机械臂或夹爪。
