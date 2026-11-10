@@ -2,6 +2,8 @@
 BasedOnStyle: Google
 IndentWidth: 4
 ContinuationIndentWidth: 8
+AlignAfterOpenBracket: DontAlign
+AlignOperands: DontAlign
 ColumnLimit: 100
 AccessModifierOffset: -4
 DerivePointerAlignment: false

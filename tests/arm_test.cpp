@@ -83,7 +83,7 @@ void TestLockDirectory(const std::filesystem::path& root) {
     struct stat info {};
 
     Check(stat(created.c_str(), &info) == 0 && (info.st_mode & 07777) == 01777,
-          "shared directory not sticky 1777");
+            "shared directory not sticky 1777");
     m::PrepareLockDirectory(created.string());  // Existing valid directory is accepted.
     const auto open = root / "open";
     std::filesystem::create_directory(open);
@@ -123,10 +123,10 @@ int main() {
         raw->freeze = true;
         session.Submit({{0.2}, 0.05});
         Check(session.Poll().status == m::Result::kRunning,
-              "cached feedback counted as completion");
+                "cached feedback counted as completion");
         Reject([&] { session.Submit({{0.3}, 0.05}); }, "busy session accepted a second target");
         Check(session.Cancel().status == m::Result::kCancelled,
-              "verified hold not reported as cancelled");
+                "verified hold not reported as cancelled");
         raw->freeze = false;
 
         // A refusal before any write leaves the session usable and issues no stop.
@@ -140,7 +140,7 @@ int main() {
         }
         Check(refused && raw->holds == holds, "refusal was latched or triggered a stop");
         Check(session.GetResult().status == m::Result::kCancelled,
-              "refusal replaced the previous result");
+                "refusal replaced the previous result");
         raw->reject = false;
 
         // Stale feedback rejects new motion; stalled motion times out and latches.
@@ -160,12 +160,12 @@ int main() {
         session.Submit({{0}, 0.05});
         raw->stop_failure = true;
         Check(session.Cancel().status == m::Result::kStopUnknown,
-              "unconfirmed stop reported as known");
+                "unconfirmed stop reported as known");
         Reject([&] { session.Submit({{0}, 0.05}); }, "stop_unknown did not latch");
         Reconnect(session);
         raw->write_failure = true;
         Check(session.Submit({{0}, 0.05}).status == m::Result::kStopUnknown,
-              "write failure reported as stopped");
+                "write failure reported as stopped");
         Reject([&] { session.Submit({{0}, 0.05}); }, "write failure did not latch");
         raw->write_failure = false;
         raw->stop_failure = false;
@@ -173,7 +173,7 @@ int main() {
         session.Submit({{0.4}, 0.05});
         raw->read_failure = true;
         Check(session.Poll().status == m::Result::kFault,
-              "read failure during motion not reported as fault");
+                "read failure during motion not reported as fault");
         raw->read_failure = false;
         Reject([&] { session.Submit({{0}, 0.05}); }, "read failure did not latch");
 
@@ -182,7 +182,7 @@ int main() {
         raw->read_failure = raw->stop_failure = true;
         const auto attempts = raw->holds;
         Check(session.Hold().status == m::Result::kStopUnknown && raw->holds == attempts + 1,
-              "hold without feedback reported as confirmed or not attempted");
+                "hold without feedback reported as confirmed or not attempted");
         raw->read_failure = raw->stop_failure = false;
         Reject([&] { session.Submit({{0}, 0.05}); }, "hold without feedback did not latch");
 

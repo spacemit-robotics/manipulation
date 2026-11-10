@@ -47,22 +47,22 @@ void ValidateTransform(const Transform& transform) {
     for (double value : transform)
         if (!std::isfinite(value)) throw std::runtime_error("nonfinite transform");
     if (std::abs(transform[12]) + std::abs(transform[13]) + std::abs(transform[14]) +
-                std::abs(transform[15] - 1) >
-        1e-8)
+                    std::abs(transform[15] - 1) >
+            1e-8)
         throw std::runtime_error("invalid homogeneous row");
     const auto pose = Matrix(transform);
     const auto rotation = pose(Rotation());
     if (cv::norm(rotation.t() * rotation - cv::Mat::eye(3, 3, CV_64F)) > 1e-6 ||
-        std::abs(cv::determinant(rotation) - 1) > 1e-6)
+            std::abs(cv::determinant(rotation) - 1) > 1e-6)
         throw std::runtime_error("nonrigid transform");
 }
 
 CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
-                                 double max_translation_m, double max_rotation_rad) {
+        double max_translation_m, double max_rotation_rad) {
     if (samples.size() < 12 || samples.size() > 1000)
         throw std::runtime_error("requires 12..1000 samples");
     if (!(max_translation_m > 0 && max_translation_m <= kCeilingMaxTranslationM &&
-          max_rotation_rad > 0 && max_rotation_rad <= kCeilingMaxRotationRad)) {
+                max_rotation_rad > 0 && max_rotation_rad <= kCeilingMaxRotationRad)) {
         throw std::runtime_error("quality thresholds must be within (0, 15 mm] and (0, 5 deg]");
     }
     std::vector<cv::Mat> rotations, translations, targets, offsets, axes;
@@ -88,7 +88,7 @@ CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
     if (!excited) throw std::runtime_error("degenerate rotational excitation");
     cv::Mat rotation, translation;
     cv::calibrateHandEye(rotations, translations, targets, offsets, rotation, translation,
-                         cv::CALIB_HAND_EYE_PARK);
+            cv::CALIB_HAND_EYE_PARK);
     cv::Mat camera = cv::Mat::eye(4, 4, CV_64F);
     rotation.copyTo(camera(Rotation()));
     translation.copyTo(camera(Translation()));
@@ -101,7 +101,7 @@ CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
     for (std::size_t i = 0; i < samples.size(); ++i)
         if (i % 4 != 0) {
             cv::Mat fixed = Inverse(Matrix(samples[i].base_from_flange)) * camera *
-                            Matrix(samples[i].camera_from_target);
+                    Matrix(samples[i].camera_from_target);
             mean_rotation += fixed(Rotation());
             mean_translation += fixed(Translation());
             ++count;
@@ -113,7 +113,7 @@ CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
     mean_translation /= count;
     for (std::size_t i = 0; i < samples.size(); ++i) {
         cv::Mat fixed = Inverse(Matrix(samples[i].base_from_flange)) * camera *
-                        Matrix(samples[i].camera_from_target);
+                Matrix(samples[i].camera_from_target);
         const double position = cv::norm(fixed(Translation()) - mean_translation);
         const double angle = Angle(mean_rotation.t() * fixed(Rotation()));
         if (!std::isfinite(position) || !std::isfinite(angle))
@@ -128,7 +128,7 @@ CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
     result.threshold_translation_m = max_translation_m;
     result.threshold_rotation_rad = max_rotation_rad;
     result.quality_passed = result.maximum_translation_m <= max_translation_m &&
-                            result.maximum_rotation_rad <= max_rotation_rad;
+            result.maximum_rotation_rad <= max_rotation_rad;
     return result;
 }
 }  // namespace spacemit::manipulation

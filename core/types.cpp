@@ -15,9 +15,9 @@ namespace spacemit::manipulation {
 namespace {
 bool ValidId(const std::string& name) {
     return !name.empty() && name.size() <= 80 &&
-           name.find_first_not_of(
-                   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") ==
-                   std::string::npos;
+            name.find_first_not_of(
+                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") ==
+            std::string::npos;
 }
 
 void Require(bool condition, const char* message) {

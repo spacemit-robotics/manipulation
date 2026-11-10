@@ -61,7 +61,7 @@ void WorkerChannel::Start(const std::vector<std::string>& arguments) {
     socket_ = pair[0];
     request_ = 0;
     session_ = std::to_string(getpid()) + "-" +
-               std::to_string(Clock::now().time_since_epoch().count());
+            std::to_string(Clock::now().time_since_epoch().count());
 }
 
 void WorkerChannel::Wait(short events, Clock::time_point deadline) {
@@ -91,9 +91,8 @@ YAML::Node WorkerChannel::Call(const std::string& operation, const std::string& 
                     .count();
     const auto id = ++request_;
     const std::string request = "{\"v\":1,\"session\":\"" + session_ +
-                                "\",\"id\":" + std::to_string(id) +
-                                ",\"deadline_ns\":" + std::to_string(nanoseconds) + ",\"op\":\"" +
-                                operation + "\"" + fields + "}\n";
+            "\",\"id\":" + std::to_string(id) + ",\"deadline_ns\":" + std::to_string(nanoseconds) +
+            ",\"op\":\"" + operation + "\"" + fields + "}\n";
     bool rejected = false;
     try {
         std::size_t offset = 0;
@@ -119,7 +118,7 @@ YAML::Node WorkerChannel::Call(const std::string& operation, const std::string& 
             throw std::runtime_error("unexpected worker frame");
         const auto node = YAML::Load(response);
         if (node["v"].as<int>() != 1 || node["session"].as<std::string>() != session_ ||
-            node["id"].as<std::uint64_t>() != id)
+                node["id"].as<std::uint64_t>() != id)
             throw std::runtime_error("worker response identity mismatch");
         if (node["ok"].as<bool>()) return node["data"];
         rejected = node["rejected"] && node["rejected"].as<bool>();

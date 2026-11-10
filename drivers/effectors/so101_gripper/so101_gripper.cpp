@@ -45,21 +45,21 @@ public:
         const auto& settings = session_->Config();
         sample_ = session_->Read(settings.gripper_id);
         if ((settings.gripper_offset && *settings.gripper_offset != sample_.offset) ||
-            (connected_offset_ && *connected_offset_ != sample_.offset)) {
+                (connected_offset_ && *connected_offset_ != sample_.offset)) {
             throw std::runtime_error(
                     "SO101 gripper homing offset differs from calibration or changed during use");
         }
         connected_offset_ = sample_.offset;
         if (std::chrono::duration<double>(Clock::now() - started).count() >
-            definition_.maximum_age_s) {
+                definition_.maximum_age_s) {
             throw std::runtime_error("SO101 gripper feedback exceeded maximum_age_s");
         }
         if (std::min(settings.closed_ticks, settings.open_ticks) < sample_.minimum ||
-            std::max(settings.closed_ticks, settings.open_ticks) > sample_.maximum) {
+                std::max(settings.closed_ticks, settings.open_ticks) > sample_.maximum) {
             throw std::runtime_error("SO101 gripper calibration exceeds installed hardware limits");
         }
         double position = (sample_.position - settings.closed_ticks) /
-                          (settings.open_ticks - settings.closed_ticks);
+                (settings.open_ticks - settings.closed_ticks);
         // Preserve out-of-range evidence; a narrow overshoot is bounded to encoder quantization
         // only.
         if (position < -0.02 || position > 1.02) {
@@ -69,13 +69,12 @@ public:
         // Holding long enough trips overload protection, which only limits output to
         // Overload_Torque: expected while gripping an object. Every other servo error is a fault.
         const bool fault = (sample_.error & ~kOverloadError) != 0 || !sample_.position_mode;
-        holding_ =
-                target_.has_value() && sample_.enabled && !sample_.moving &&
+        holding_ = target_.has_value() && sample_.enabled && !sample_.moving &&
                 *target_ <
                         position - definition_.tolerance &&  // Stopped short of a closing target.
                 std::abs(sample_.load) >= settings.grip_load_threshold;
-        EffectorState state{{position},     started, ++sample_id_, true,
-                            sample_.moving, fault,   "",           sample_.enabled};
+        EffectorState state{{position}, started, ++sample_id_, true, sample_.moving, fault, "",
+                sample_.enabled};
         state.loads = {std::clamp(sample_.load / 1000.0, -1.0, 1.0)};
         state.holding = holding_;
         return state;
@@ -86,7 +85,7 @@ public:
         if (state.fault || state.moving)
             throw CommandRejected("SO101 gripper must be stationary and fault-free");
         if (sample_.torque_limit > kGripperTorqueLimit ||
-            sample_.protection_current > kGripperProtectionCurrent) {
+                sample_.protection_current > kGripperProtectionCurrent) {
             throw CommandRejected(
                     "SO101 gripper protection is not configured (Max_Torque_Limit <= " +
                     std::to_string(kGripperTorqueLimit) +
@@ -117,8 +116,9 @@ public:
 
     void Submit(const EffectorPoint& point) override {
         if (point.positions.size() != 1 || !std::isfinite(point.positions[0]) ||
-            point.positions[0] < 0 || point.positions[0] > 1 || !std::isfinite(point.duration_s) ||
-            point.duration_s <= 0 || point.duration_s > 120) {
+                point.positions[0] < 0 || point.positions[0] > 1 ||
+                !std::isfinite(point.duration_s) || point.duration_s <= 0 ||
+                point.duration_s > 120) {
             throw CommandRejected(
                     "SO101 gripper needs one position in [0,1] and duration in (0,120]");
         }
@@ -127,9 +127,8 @@ public:
             throw CommandRejected("SO101 gripper requires fault-free feedback and explicit enable");
         }
         const auto& settings = session_->Config();
-        const int target = static_cast<int>(
-                std::lround(settings.closed_ticks +
-                            point.positions[0] * (settings.open_ticks - settings.closed_ticks)));
+        const int target = static_cast<int>(std::lround(settings.closed_ticks +
+                point.positions[0] * (settings.open_ticks - settings.closed_ticks)));
         const double distance = std::abs(JointPosition(target) - JointPosition(sample_.position));
         const double speed =
                 std::min(settings.maximum_velocity, std::max(0.01, distance / point.duration_s));
@@ -144,7 +143,7 @@ public:
         // it.
         if (!holding_) {
             session_->Target({Id()}, {sample_.position},
-                             {std::min(session_->Config().maximum_velocity, 0.05)});
+                    {std::min(session_->Config().maximum_velocity, 0.05)});
             target_ = initial.positions[0];
         }
         auto previous = initial.positions[0];
@@ -154,7 +153,7 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(20));
             const auto state = Read();
             const bool still = sample_.enabled && !state.fault && !state.moving &&
-                               std::abs(state.positions[0] - previous) < 0.01;
+                    std::abs(state.positions[0] - previous) < 0.01;
             stationary = still ? stationary + 1 : 0;
             if (stationary >= 2) return true;
             previous = state.positions[0];
@@ -176,8 +175,8 @@ private:
 };
 }  // namespace
 
-std::unique_ptr<EndEffector> MakeGripper(const EffectorConfig& definition,
-                                         std::shared_ptr<SharedSession> session) {
+std::unique_ptr<EndEffector> MakeGripper(
+        const EffectorConfig& definition, std::shared_ptr<SharedSession> session) {
     return std::make_unique<So101Gripper>(definition, std::move(session));
 }
 }  // namespace spacemit::manipulation::so101

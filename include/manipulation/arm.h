@@ -6,8 +6,8 @@
  *
  * No end effector, vendor types or implicit home or enable.
  */
-#ifndef MANIPULATION_ARM_H_
-#define MANIPULATION_ARM_H_
+#ifndef ARM_H
+#define ARM_H
 
 #include <string>
 #include <vector>
@@ -183,4 +183,4 @@ public:
 };
 
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_ARM_H_
+#endif  // ARM_H

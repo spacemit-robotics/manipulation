@@ -615,19 +615,17 @@ class BusTests(unittest.TestCase):
 
     def test_capture_and_all_keep_an_existing_site_file_without_bus_traffic(self):
         for operation in ("capture", "all"):
-            with (
-                self.subTest(operation=operation),
-                tempfile.TemporaryDirectory(prefix="so101-site-") as site,
-            ):
-                (Path(site) / "so101").mkdir()
-                (Path(site) / "so101/so101_gripper_calibration.json").write_text("{}")
-                result = self.tool(operation, site=site)
-                self.assertEqual(result.returncode, 1)
-                self.assertIn("existing calibration kept", result.stderr)
-                self.assertEqual(
-                    (Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}"
-                )
-                self.assertFalse((Path(site) / "so101/so101_calibration.json").exists())
+            with self.subTest(operation=operation):
+                with tempfile.TemporaryDirectory(prefix="so101-site-") as site:
+                    (Path(site) / "so101").mkdir()
+                    (Path(site) / "so101/so101_gripper_calibration.json").write_text("{}")
+                    result = self.tool(operation, site=site)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("existing calibration kept", result.stderr)
+                    self.assertEqual(
+                        (Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}"
+                    )
+                    self.assertFalse((Path(site) / "so101/so101_calibration.json").exists())
         self.assertEqual(self.bus.requests, [])
 
     def test_lost_write_is_reported_though_the_servo_acknowledged_it(self):

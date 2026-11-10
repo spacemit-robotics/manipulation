@@ -4,8 +4,8 @@
  * @file resource_paths.h
  * @brief Configuration-relative resource resolution, without opening a device.
  */
-#ifndef MANIPULATION_RESOURCE_PATHS_H_
-#define MANIPULATION_RESOURCE_PATHS_H_
+#ifndef RESOURCE_PATHS_H
+#define RESOURCE_PATHS_H
 
 #include <string>
 #include <vector>
@@ -25,7 +25,6 @@ namespace spacemit::manipulation {
  * @return Options with the declared paths resolved.
  */
 DriverOptions ResolveResourceOptions(const DriverOptions& options, const std::string& directory,
-                                     const std::vector<std::string>& resources,
-                                     const std::vector<std::string>& executables);
+        const std::vector<std::string>& resources, const std::vector<std::string>& executables);
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_RESOURCE_PATHS_H_
+#endif  // RESOURCE_PATHS_H

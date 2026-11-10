@@ -6,6 +6,8 @@
  *
  * Units are radians and seconds unless a name says otherwise.
  */
+// Keep distinct from the motor component's TYPES_H guard.
+// NOLINTNEXTLINE(build/header_guard)
 #ifndef MANIPULATION_TYPES_H_
 #define MANIPULATION_TYPES_H_
 

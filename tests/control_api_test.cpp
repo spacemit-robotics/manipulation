@@ -156,9 +156,9 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     auto* tool_raw = tool.get();
     m::DeviceSession session(definition, {std::move(arm), std::move(tool)}, directory);
     Check(!session.GetArmCapabilities().disable && !session.GetEffectorCapabilities().enable,
-          "old driver acquired new capabilities implicitly");
+            "old driver acquired new capabilities implicitly");
     Check(arm_raw->connections == 0 && tool_raw->connections == 0,
-          "capabilities connected hardware");
+            "capabilities connected hardware");
     session.Connect();
     Check(!session.ReadEffector().enabled.has_value(), "unknown torque state reported as disabled");
     Refused([&] { session.EnableArm(); });
@@ -168,19 +168,20 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     Refused([&] { session.HoldArm(); });
     Refused([&] { session.HoldEffector(); });
     Check(arm_raw->writes == 0 && arm_raw->holds == 0 && tool_raw->writes == 0 &&
-                  tool_raw->holds == 0,
-          "unsupported command reached a driver write");
+                    tool_raw->holds == 0,
+            "unsupported command reached a driver write");
     Check(!session.Latched(), "unsupported operation latched the device");
 
-    for (double step :
-         {2.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    const auto invalid_steps = {
+            2.0, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()};
+    for (double step : invalid_steps) {
         Invalid([&] { session.JogArm(0, step); });
     }
     Invalid([&] { session.JogArm(1, 0.1); });
     Invalid([&] { session.JogArm(0, 0.1, 0); });
     Check(arm_raw->writes == 0 && !session.Latched(), "invalid jog wrote or latched");
     Check(session.JogArm(0, 0.1).status == m::Result::kSucceeded && arm_raw->position == 0.1,
-          "relative joint step failed");
+            "relative joint step failed");
     const auto writes = arm_raw->writes;
     Invalid([&] { session.JogArm(0, 0.95); });
     Check(arm_raw->writes == writes, "relative joint step bypassed configured limits");
@@ -195,14 +196,14 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     Refused([&] { session.EnableEffector(); });
     Refused([&] { session.DisableEffector(); });
     Check(!session.Latched() && arm_raw->writes == writes && tool_raw->writes == 0,
-          "driver refusal mutated command state");
+            "driver refusal mutated command state");
     // A refused hold establishes no stop: it reports stop_unknown and latches until reconnect.
     Check(session.HoldArm().status == m::Result::kStopUnknown && session.Latched(),
-          "refused arm hold did not latch");
+            "refused arm hold did not latch");
     session.Disconnect();
     session.Connect();
     Check(session.HoldEffector().status == m::Result::kStopUnknown && session.Latched(),
-          "refused tool hold did not latch");
+            "refused tool hold did not latch");
     session.Disconnect();
     session.Connect();
     arm_raw->reject = tool_raw->reject = false;
@@ -211,7 +212,7 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     Refused([&] { session.HoldArm(); });
     Refused([&] { session.HoldEffector(); });
     Check(!session.ReadArm().enabled && !*session.ReadEffector().enabled,
-          "hold re-enabled a disabled device");
+            "hold re-enabled a disabled device");
     // A refusal after the driver wrote (here the confirmation read) is not "nothing written".
     arm_raw->reject_after_write = true;
     Invalid([&] { session.EnableArm(); });
@@ -222,25 +223,25 @@ void TestCapabilitiesAndRejections(const std::string& directory) {
     Check(session.ReadArm().enabled, "enable was not written");
     session.EnableEffector();
     Check(session.HoldArm().status == m::Result::kSucceeded &&
-                  session.HoldEffector().status == m::Result::kSucceeded,
-          "enabled hold failed");
+                    session.HoldEffector().status == m::Result::kSucceeded,
+            "enabled hold failed");
     Check(session.ReadArm().enabled && *session.ReadEffector().enabled, "hold released torque");
 
     arm_raw->fault = true;
     Check(session.HoldArm().status == m::Result::kSucceeded && session.Latched(),
-          "hold did not preserve an observed arm fault");
+            "hold did not preserve an observed arm fault");
     Check(session.HoldEffector().status == m::Result::kSucceeded && session.Latched(),
-          "tool hold cleared the assembly fault");
+            "tool hold cleared the assembly fault");
     arm_raw->fault = false;
     Invalid([&] { session.JogArm(0, 0.1); });
     session.Disconnect();
     session.Connect();
     tool_raw->confirm_hold = false;
     Check(session.HoldEffector().status == m::Result::kStopUnknown && session.Latched(),
-          "unconfirmed tool hold did not latch");
+            "unconfirmed tool hold did not latch");
     tool_raw->confirm_hold = true;
     Check(session.HoldEffector().status == m::Result::kSucceeded && session.Latched(),
-          "later confirmed hold cleared an unknown-stop latch");
+            "later confirmed hold cleared an unknown-stop latch");
 }
 
 void TestMockTorque(const std::string& directory) {
@@ -253,20 +254,20 @@ void TestMockTorque(const std::string& directory) {
     session.DisableEffector();
     Invalid([&] { session.MoveEffector({{0.5}, 0.1}); });
     Check(!session.Latched() && session.ReadEffector().positions == std::vector<double>{1},
-          "disabled effector moved or latched");
+            "disabled effector moved or latched");
     session.EnableEffector();
     session.DisableArm();
     Invalid([&] { session.JogArm(0, 0.1); });
     Check(!session.Latched() && session.ReadArm().joints_rad == std::vector<double>{0},
-          "disabled arm moved or latched");
+            "disabled arm moved or latched");
     session.EnableArm();
     Check(session.JogArm(0, -0.1).status == m::Result::kSucceeded, "re-enabled mock cannot move");
     Check(session.MoveEffector({{0.5}, 0.1}).status == m::Result::kSucceeded,
-          "re-enabled mock tool cannot move");
+            "re-enabled mock tool cannot move");
     // A measured move longer than the effector timeout_s could only time out: refused unwritten.
     Refused([&] { session.MoveEffector({{1}, definition.effector.timeout_s + 1}); });
     Check(!session.Latched() && session.ReadEffector().positions == std::vector<double>{0.5},
-          "over-long effector move was written or latched");
+            "over-long effector move was written or latched");
 }
 }  // namespace
 

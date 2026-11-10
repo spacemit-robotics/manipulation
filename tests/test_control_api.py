@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public control operations and permissions over the real local service, without hardware."""
 
+from contextlib import ExitStack
 import importlib.util
 import json
 import os
@@ -258,14 +259,19 @@ class ControlApiTests(unittest.TestCase):
         }
         for operation, (method, permission) in cases.items():
             with self.subTest(operation=operation):
-                with (
-                    patch.object(
-                        sys, "argv", ["manipulation", "--prefix", str(self.directory), operation]
-                    ),
-                    patch.object(operator_cli, "Context") as context_type,
-                    patch("spacemit_manipulation.client.DeviceClient") as client_type,
-                    patch("builtins.print"),
-                ):
+                with ExitStack() as patches:
+                    patches.enter_context(
+                        patch.object(
+                            sys,
+                            "argv",
+                            ["manipulation", "--prefix", str(self.directory), operation],
+                        )
+                    )
+                    context_type = patches.enter_context(patch.object(operator_cli, "Context"))
+                    client_type = patches.enter_context(
+                        patch("spacemit_manipulation.client.DeviceClient")
+                    )
+                    patches.enter_context(patch("builtins.print"))
                     context = context_type.return_value
                     context.binary.return_value = CLI
                     context.plan.return_value = self.filename

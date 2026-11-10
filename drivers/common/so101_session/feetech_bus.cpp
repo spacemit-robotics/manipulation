@@ -100,8 +100,8 @@ feetech_bus* feetech_bus_open(const char* port, const uint8_t* ids, size_t count
         StdoutToStderr quiet;
         for (size_t i = 0; i < count && !error; ++i) {
             motor_dev* servo = ids[i] >= 1 && ids[i] <= 253 && !bus->servos.count(ids[i])
-                                       ? motor_alloc_uart(kDriver, port, kBaud, ids[i], nullptr)
-                                       : nullptr;
+                    ? motor_alloc_uart(kDriver, port, kBaud, ids[i], nullptr)
+                    : nullptr;
             if (servo) {
                 bus->servos[ids[i]] = servo;
             } else {
@@ -135,14 +135,14 @@ int feetech_bus_read(feetech_bus* bus, uint8_t id, uint8_t address, uint8_t* dat
     return 0;
 }
 
-int feetech_bus_write(feetech_bus* bus, uint8_t id, uint8_t address, const uint8_t* data,
-                      size_t length) {
+int feetech_bus_write(
+        feetech_bus* bus, uint8_t id, uint8_t address, const uint8_t* data, size_t length) {
     motor_dev* servo = Servo(bus, id, address, data, length);
     if (!servo) return -1;
     std::vector<uint8_t> actual(length);
     if (motor_set_paras(servo, &address, data, static_cast<uint32_t>(length)) != 0 ||
-        motor_get_paras(servo, &address, actual.data(), static_cast<uint32_t>(length)) != 0 ||
-        std::memcmp(actual.data(), data, length) != 0) {
+            motor_get_paras(servo, &address, actual.data(), static_cast<uint32_t>(length)) != 0 ||
+            std::memcmp(actual.data(), data, length) != 0) {
         errno = EIO;
         return -1;
     }
