@@ -1,0 +1,19 @@
+# Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+# SPDX-License-Identifier: Apache-2.0
+# A separately registered arm combined with the built-in mock end effector.
+schema_version: 3
+device:
+  arm:
+    driver: example_bench_mock
+    device_id: bench
+    resource_id: extension_bench_arm
+    joints:
+      - {name: joint1, minimum_rad: -1, maximum_rad: 1}
+  effector:
+    driver: mock
+    device_id: tool
+    resource_id: extension_bench_tool
+    channels: [finger]
+steps:
+  - {capability: joint_point, target_rad: [0.2], speed_scale: 0.05}
+  - {capability: effector_position, positions: [0.5], duration_s: 0.1}

@@ -34,14 +34,69 @@ steps:                            # 0–128 步，run 按顺序执行
     - {capability: effector_position, positions: [...], duration_s: 0.5}
 ```
 
-| 步骤 | 字段 | 约束 |
-| --- | --- | --- |
-| `joint_point` | `target_rad` | 数量与 `joints` 相同，每项在关节限位内 |
-| | `speed_scale` | 控制器速度倍率 `(0, 1]`，不是 rad/s；不低于驱动下限 |
-| `effector_position` | `positions` | 数量与 `channels` 相同，每项在 `[0, 1]`：`0` 闭合，`1` 张开 |
-| | `duration_s` | `(0, 驱动上限]`，且不超过末端 `timeout_s` |
-
 `options` 中的路径由驱动声明，相对配置文件所在目录解析。
+
+### 独立角色配置
+
+与整机 `device.driver/options` 二选一，不能混用。其他公共字段和 `steps` 不变：
+
+```yaml
+schema_version: 3
+device:
+    arm:
+        driver: mock
+        device_id: arm
+        resource_id: mock_arm
+        joints: [{name: joint1, minimum_rad: -1, maximum_rad: 1}]
+        options: {}
+    effector:
+        driver: mock
+        device_id: tool
+        resource_id: mock_tool
+        channels: [finger]
+        options: {}
+steps: []
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `device.arm.driver` | 必填，已注册机械臂驱动 |
+| `device.arm.options` | 该机械臂的字符串选项，最多 32 项；默认空 |
+| `device.effector.driver` | 有末端时必填，已注册末端驱动 |
+| `device.effector.resource_id` | 独立角色模式有末端时必填；整机模式省略时继承臂资源 |
+| `device.effector.options` | 该末端的字符串选项，最多 32 项；默认空 |
+
+资源标识只允许字母、数字、`_`、`-`。不同标识调用独立工厂；相同标识要求该驱动对已注册共享工厂，且连接选项一致。
+`model` 标识机械臂关节链，不由末端型号推断。组合不改变设备的能力声明。
+
+| 角色驱动 | 选项 |
+| --- | --- |
+| 机械臂 `mock`、末端 `mock` | 无 |
+| 机械臂 `nero`、末端 `revo2` | `channel`、`python`、`sdk_root`、`worker`；各自资源标识须为 `agx_<channel>` |
+| 机械臂 `so101` | `port`、`arm_ids`、`arm_calibration`、`max_velocity_rad_s` |
+| 末端 `so101_gripper` | `port`、`gripper_id`、`gripper_calibration`、`max_velocity_rad_s`、`grip_load_threshold` |
+
+各选项含义与下表的整机驱动一致。`nero + revo2` 和 `so101 + so101_gripper` 已登记共享连接；SO101 共享配置中重复提供的选项须一致。
+
+### 已注册顺序能力
+
+每一步必须有 `capability`。参数解析、支持条件和执行函数均来自注册表；新增名称不改变解析器。
+解析时检查全部步骤及实际驱动能力；执行时再次检查，实时起点和反馈由设备会话判断。
+
+| 能力 | 必填字段 | 可选字段与默认值 |
+| --- | --- | --- |
+| `joint_point` | `target_rad`、`speed_scale` | `tolerance_rad: 0`、`wait_for_arrival: true`、`resend_interval_s: 0` |
+| `effector_position` | `positions`、`duration_s` | 无 |
+| `joint_jog` | `joint_index`（从 0 开始）、`delta_rad` | `speed_scale: 0.05` |
+| `joint_path` | `waypoints_rad`（1–128 个关节点） | `max_velocity_rad_s: 0.2`、`max_acceleration_rad_s2: 0.2`、`speed_scale: 0.05`、`tolerance_rad: 0` |
+| `joint_trajectory` | `times_s`、`positions_rad` | `command_rate_hz: 100`、`max_step_rad: 0.0174533`、`speed_scale: 1`、`tolerance_rad: 0`、`wait_for_arrival: true` |
+| `arm_hold` / `effector_hold` | 无 | 无；要求驱动能确认停止 |
+
+- 关节目标为 rad，维数和限位与设备配置一致；`speed_scale` 为 `(0,1]` 且不低于驱动下限。
+- `positions` 按末端通道排列，每项 `[0,1]`；`duration_s` 大于 0，且不超过驱动与末端期限。
+- 路径和轨迹的范围、起点及到位条件与同名设备 API 一致。顺序轨迹不提供 `effector_schedule`，该组合仍通过直接 API 使用。
+- `joint_jog` 的最终目标由实时起点计算，下发前检查限位。
+- `unverified` 不等于到位；顺序任务保留该结果，失败或取消后不执行后续步骤。
 
 ### 末端反馈
 
@@ -114,9 +169,10 @@ steps:                            # 0–128 步，run 按顺序执行
 | 子命令 | 作用 |
 | --- | --- |
 | `drivers` | 列出已注册驱动 |
+| `driver-roles` | 分别列出已注册机械臂与末端驱动，不连接设备 |
 | `validate PLAN` | 离线校验配置，不导入厂商 SDK |
 | `describe PLAN` | 输出驱动、型号、关节名与限位、机械臂 `timeout_s`、通道名（JSON），不连接设备 |
-| `capabilities PLAN` | 离线查询机械臂与末端的驱动能力 |
+| `capabilities PLAN` | 离线查询驱动能力，以及 `registered` 列表中的能力 `id`、`supported`、`reason`、`description` |
 | `inspect PLAN` | 获取独占、连接、诊断并输出状态 |
 | `run PLAN [--enable]` | 执行 `steps`；`--enable` 先显式使能；`unverified` 步骤不中断序列 |
 | `arm-check PLAN [--timeout-only]` | 关节 1 往返 0.01 rad，再测试取消和重连；`--timeout-only` 改为检查 1 ms 期限的超时锁定 |
@@ -127,6 +183,7 @@ steps:                            # 0–128 步，run 按顺序执行
 退出码：`0` 成功；`1` 任务未成功或被中断；`2` 参数、配置或连接错误；`3` 全部步骤完成，但含 `unverified` 步骤。
 
 `run` 最后一行是汇总结果，形如 `{"status":"succeeded","physical_grip_verified":false}`。
+独立组合的 `describe` 另含 `arm_driver`、`effector_driver`、`arm_resource_id`、`effector_resource_id`；`driver` 为 `composed`。
 
 **状态字段**（`inspect` 输出与 Python `state()` 返回同一份 JSON）：
 
@@ -152,9 +209,11 @@ steps:                            # 0–128 步，run 按顺序执行
 | 子命令 | 参数与说明 |
 | --- | --- |
 | `check` | `--profile build\|control\|vision`；`vision` 另检查 OpenCV、SciPy、`pyrealsense2` |
+| `drivers [--roles]` | 整机注册列表；`--roles` 改为独立角色列表 |
 | `configure MODEL` | 生成 `SITE/MODEL/device.yaml` 并设为当前设备；`--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD`；不覆盖已有文件 |
 | `use [NAME]` | 把 `SITE/NAME/device.yaml` 设为当前设备；省略 `NAME` 时只列出已配置的设备，`*` 标记当前设备 |
 | `validate` / `inspect` / `capabilities` | 同 `manipulation-device` 对应子命令 |
+| `run [--enable]` | 执行所选计划中的顺序任务；默认不使能 |
 | `monitor` | 只读，持续打印关节角（度）、状态、末端位置、负载与抓握判断；`--rate HZ`（1–20，默认 5）、`--count N` |
 | `enable` / `disable`、`hand-enable` / `hand-disable` | 使能 / 释放扭矩；失能前须支撑机械臂并取下所持物品 |
 | `hold` / `hand-hold` | 保持当前位置，不释放扭矩 |
@@ -168,9 +227,11 @@ steps:                            # 0–128 步，run 按顺序执行
 | `ik X Y Z` | 逆解，不运动；`--rpy R P Y`、`--orientation-weight W`、`--seed-pose FILE`（离线求解）；不收敛时退出码 2 |
 | `pose-move X Y Z` | 逆解后关节点位运动；参数同 `ik`，另有 `--speed`；按控制器速度上限估算的时长超过 `timeout_s` 时不运动 |
 | `line-move X Y Z` | 末端直线运动；另有 `--step-mm`（默认 5）；支持连续路径的驱动另用 `--path-velocity`、`--path-acceleration` |
-| `hand-eye collect NAME` | `--sampler MODULE`、`--option NAME=VALUE`（见下）、`--count N`（12–100） |
+| `hand-eye configure FILE` | 新建采集配置；必填 `--installation-id ID`、`--board FILE`，可选 `--plan FILE`、`--serial SN` |
+| `hand-eye collect NAME` | `--config FILE`，或 `--plan FILE`、`--sampler MODULE`、`--option NAME=VALUE`（见下）；`--count N`（12–100，默认 12） |
 | `hand-eye solve NAME` | 生成 `candidate.json`；`--max-error-mm`（默认 5，≤15）、`--max-error-deg`（默认 2，≤5） |
 | `hand-eye promote` / `export` / `restore NAME` | 分别生成 `active.json`、`extrinsic.json`、`restored.json` |
+| `hand-eye export-perceptive NAME` | 从 `active.json` 新建抓取外参片段；必填 `--installation-id ID`、`--output FILE`；`--camera-type realsense\|spacemit_las2`（默认 `realsense`） |
 
 `hand-eye collect` 的 `--option` 可重复：
 
@@ -182,6 +243,26 @@ steps:                            # 0–128 步，run 按顺序执行
 | `window=FILE\|x0,y0,x1,y1` | 标定板须完整位于的图像区域 |
 
 求解残差阈值同时适用于全部样本与留出样本，实际使用的阈值写入结果。
+
+### 手眼采集配置
+
+JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`--sampler` 覆盖或 `--option` 混用。
+
+| 字段 | 默认 / 含义 |
+| --- | --- |
+| `schema_version` | 必填，`1` |
+| `installation_id` | 必填，固定机械臂与相机安装的非空标识 |
+| `device_plan` / `model` | 必填，设备 YAML 与关节链 `model.json` |
+| `sampler.module` | `spacemit_manipulation.charuco_sampler` |
+| `sampler.options` | 字符串键值，内置采样器要求 `board` |
+| `sampler.path_options` | 文件类选项名，默认 `["board", "window"]`；矩形数值形式的 `window` 不作路径处理 |
+| `frames.base` / `frames.flange` | 默认模型 `base` / `tip`，指定值须与模型相同 |
+| `frames.camera` / `frames.target` | `color_optical` / `calibration_board` |
+
+共享会话包含 `manifest.json`、样本和绑定的设备、模型、相机、标定板及坐标系身份。
+采集未完成、身份混用或依赖文件变化会被拒绝。旧 `dataset.json` 及旧 Dice 会话继续按原格式读取。
+跨应用导出要求显式安装标识、匹配的相机类型和 `color_optical` 坐标系、通过质量门限的结果。
+`export-perceptive` 写入 `calibration.<camera_type>.T_base_camera`：`translation` 为 m，`rotation` 为 XYZ RPY rad，方向为相机到机械臂基座，不修改应用配置。
 
 ### so101-calibrate
 
@@ -224,6 +305,7 @@ steps:                            # 0–128 步，run 按顺序执行
 ## 4. 设备独占
 
 - **资源锁**：连接时在 `/run/lock/spacemit-manipulation/<resource_id>.lock` 上加排他锁，进程退出时释放。
+  - 独立组合按标识排序、去重并获取全部资源锁后才连接设备；任一失败释放已取得的资源。
   - 锁目录由组件自动创建并设置 sticky 位，所有使用本组件的程序共用同一目录，因而互斥。
 - **Nero**：驱动另外持有 `/tmp/nero_<channel>_control.lock`，与使用该锁的 pyAgxArm 程序互斥。
 - **SO101**：
@@ -242,6 +324,8 @@ steps:                            # 0–128 步，run 按顺序执行
 | `arm.h` | 驱动接口 `Arm`、`ArmState`、`JointPoint`、`JointPath`、`JointTrajectory` |
 | `device.h` | 驱动接口 `EndEffector`、注册表 `DeviceRegistry`、会话 `DeviceSession` |
 | `device_plan.h` | `LoadDevicePlan`、`RunDeviceSteps` |
+| `device_composition.h` | `DeviceComposition`、`ParseDeviceComposition` |
+| `capability.h` | `CapabilityRegistry`、`CapabilityDescriptor`、`MakeBuiltinCapabilityRegistry` |
 | `calibration.h` | `SolveEyeToHand`（需 `MANIPULATION_ENABLE_CALIBRATION`） |
 
 `DeviceSession` 的方法由同一所有者串行调用：
@@ -258,6 +342,10 @@ steps:                            # 0–128 步，run 按顺序执行
 | `MoveArm` / `MoveArmPath` / `MoveArmTrajectory` / `MoveEffector` | 阻塞执行并返回 `CommandResult`；`cancelled` 每 10 ms 调用一次 |
 | `FollowArm(point)` / `FollowEffector(point)` | 目标跟随：发出目标即返回，见 [§6 完成条件](#完成条件) |
 | `Latched()` | 是否处于锁定 |
+
+`CreatePlanDevices(plan, registry)` 同时支持整机与独立角色配置。
+`LoadDevicePlan` 和 `RunDeviceSteps` 支持传入能力注册表的重载；未传入时使用构建中登记的能力。
+`DeviceRegistry::RegisterArm` / `RegisterEffector` / `RegisterShared` 分别注册单角色与共享工厂；`Register` 保持整机接口。
 
 ## 6. Python API
 
@@ -281,6 +369,7 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `move_arm_trajectory(times_s, positions_rad, command_rate_hz=100, max_step_rad=0.0174533, speed_scale=1.0, tolerance_rad=0, wait_for_arrival=True, effector_schedule=(), allow_unverified=False)` | 定时轨迹 |
 | `follow_arm(target_rad, speed_scale)` | 关节目标跟随，发出目标即返回 |
 | `move_effector(positions, duration_s=0.5, allow_unverified=False)` | 末端各通道移到绝对位置（`0` 闭合，`1` 张开） |
+| `execute_capability(name, parameters=None, allow_unverified=False)` | 调用已注册能力；`parameters` 为该能力的字段字典，不能覆盖 `capability`；沿用取消、期限与运动授权 |
 | `follow_effector(positions, duration_s=0.1, allow_unverified=False)` | 末端目标跟随，发出目标即返回 |
 | `close()` | 关闭会话；也可使用 `with` |
 

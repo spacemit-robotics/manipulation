@@ -37,18 +37,25 @@ private:
 }  // namespace
 
 void RegisterBenchDevice(DeviceRegistry* registry) {
+    registry->RegisterArm({"example_bench_mock", 1,
+            [](const DeviceConfig& config, const DriverOptions& options) {
+                if (config.joints.size() != 1 || !options.empty())
+                    throw std::runtime_error("bench arm requires one joint and no options");
+            },
+            [](const DeviceConfig&, const DriverOptions&) {
+                return std::make_unique<BenchArm>();
+            }});
     registry->Register({"example_bench_mock", 1,
-                        [](const DeviceDefinition& definition, const DriverOptions& options) {
-                            if (definition.arm.joints.size() != 1 ||
-                                !definition.effector.channels.empty() || !options.empty()) {
-                                throw std::runtime_error(
-                                        "bench example requires one joint, no tool/options");
-                            }
-                        },
-                        [](const DeviceDefinition&, const DriverOptions&) {
-                            Devices devices;
-                            devices.arm = std::make_unique<BenchArm>();
-                            return devices;
-                        }});
+            [](const DeviceDefinition& definition, const DriverOptions& options) {
+                if (definition.arm.joints.size() != 1 || !definition.effector.channels.empty() ||
+                        !options.empty()) {
+                    throw std::runtime_error("bench example requires one joint, no tool/options");
+                }
+            },
+            [](const DeviceDefinition&, const DriverOptions&) {
+                Devices devices;
+                devices.arm = std::make_unique<BenchArm>();
+                return devices;
+            }});
 }
 }  // namespace spacemit::manipulation

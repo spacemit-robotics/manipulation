@@ -11,8 +11,7 @@ int main(int argc, char** argv) {
         if (argc != 2) throw std::runtime_error("device-state PLAN");
         auto registry = m::MakeBuiltinDeviceRegistry();
         auto plan = m::LoadDevicePlan(argv[1], registry);
-        m::DeviceSession session(plan.definition,
-                                 registry.Create(plan.driver, plan.definition, plan.options));
+        m::DeviceSession session(plan.definition, m::CreatePlanDevices(plan, registry));
         session.Connect();
         auto state = session.ReadArm();
         std::cout << "joints=" << state.joints_rad.size() << " moving=" << state.moving << '\n';

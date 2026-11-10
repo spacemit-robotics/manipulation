@@ -90,10 +90,33 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/builtin_registry.cpp" CONTENT
 target_sources(manipulation_drivers PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/builtin_registry.cpp")
 
 # Capabilities and tools.
-add_library(manipulation_motion runtime/device_plan.cpp)
+add_library(manipulation_motion runtime/device_plan.cpp runtime/device_composition.cpp
+    capabilities/capability_registry.cpp capabilities/motion/registered_capabilities.cpp)
 target_link_libraries(manipulation_motion PUBLIC manipulation_contracts PRIVATE yaml-cpp
     Threads::Threads)
 set_target_properties(manipulation_motion PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set(MANIPULATION_EXTRA_CAPABILITY_DIRS "" CACHE STRING "Additional capability module directories")
+set_property(GLOBAL PROPERTY MANIPULATION_CAPABILITY_REGISTRATIONS "")
+manipulation_register_capability(RegisterMotionCapabilities)
+foreach(module IN LISTS MANIPULATION_EXTRA_CAPABILITY_DIRS)
+    string(MD5 module_key "${module}")
+    add_subdirectory("${module}" "extra_capabilities/${module_key}")
+endforeach()
+get_property(capability_registrations GLOBAL PROPERTY MANIPULATION_CAPABILITY_REGISTRATIONS)
+set(capability_source
+    "#include \"manipulation/capability.h\"\nnamespace spacemit::manipulation {\n")
+foreach(symbol IN LISTS capability_registrations)
+    string(APPEND capability_source "void ${symbol}(CapabilityRegistry*);\n")
+endforeach()
+string(APPEND capability_source
+    "CapabilityRegistry MakeBuiltinCapabilityRegistry() { CapabilityRegistry registry;\n")
+foreach(symbol IN LISTS capability_registrations)
+    string(APPEND capability_source "${symbol}(&registry);\n")
+endforeach()
+string(APPEND capability_source "return registry; }\n}\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/builtin_capabilities.cpp"
+    CONTENT "${capability_source}")
+target_sources(manipulation_motion PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/builtin_capabilities.cpp")
 add_executable(manipulation-device capabilities/motion/cli/device_cli.cpp
     capabilities/motion/cli/device_service.cpp capabilities/diagnostics/arm_check.cpp)
 target_include_directories(manipulation-device PRIVATE capabilities/diagnostics)
@@ -132,6 +155,9 @@ install(FILES capabilities/kinematics/python/urdf_fk.py capabilities/kinematics/
     capabilities/calibration/cli/collect.py capabilities/calibration/cli/hand_eye_cli.py
     capabilities/calibration/python/sampling.py capabilities/calibration/python/charuco.py
     capabilities/calibration/python/charuco_sampler.py capabilities/diagnostics/cli/operator_cli.py
+    capabilities/calibration/python/calibration_geometry.py
+    capabilities/calibration/python/hand_eye.py
+    capabilities/calibration/python/calibration_session.py
     DESTINATION ${MANIPULATION_PYTHON_DIR}/spacemit_manipulation)
 install(DIRECTORY descriptions/ DESTINATION ${CMAKE_INSTALL_DATADIR}/manipulation/descriptions)
 install(DIRECTORY examples/ DESTINATION ${CMAKE_INSTALL_DATADIR}/manipulation/examples)
@@ -172,8 +198,24 @@ if(BUILD_TESTING)
     add_executable(manipulation_device_test tests/device_test.cpp)
     target_link_libraries(manipulation_device_test PRIVATE manipulation_motion manipulation_drivers)
     add_test(NAME manipulation_device_embedded_contract COMMAND manipulation_device_test)
-    set_tests_properties(manipulation_arm_contract manipulation_device_embedded_contract PROPERTIES
+    add_executable(manipulation_capability_test tests/capability_test.cpp)
+    target_link_libraries(manipulation_capability_test PRIVATE manipulation_motion
+        manipulation_drivers yaml-cpp)
+    add_test(NAME manipulation_capability_contract COMMAND manipulation_capability_test)
+    add_executable(manipulation_composition_test tests/composition_test.cpp)
+    target_link_libraries(manipulation_composition_test PRIVATE manipulation_contracts
+        manipulation_drivers)
+    add_test(NAME manipulation_composition_contract COMMAND manipulation_composition_test)
+    add_test(NAME manipulation_composition_cli_contract COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_composition.py)
+    add_test(NAME manipulation_capability_client_contract COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capability_client.py)
+    set_tests_properties(manipulation_arm_contract manipulation_device_embedded_contract
+        manipulation_capability_contract PROPERTIES
         ENVIRONMENT "${test_environment}")
+    set_tests_properties(manipulation_composition_contract manipulation_composition_cli_contract
+        manipulation_capability_client_contract
+        PROPERTIES TIMEOUT 120 ENVIRONMENT "${test_environment}")
     add_test(NAME manipulation_device_contract COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_device.py)
     add_test(NAME manipulation_tools_contract COMMAND ${Python3_EXECUTABLE}
@@ -201,6 +243,7 @@ if(BUILD_TESTING)
         set(so101_environment "${test_environment}"
             "MANIPULATION_FEETECH_BUS=$<TARGET_FILE:manipulation_feetech_bus>")
         set_tests_properties(manipulation_so101_contract manipulation_so101_calibration_contract
+            manipulation_composition_cli_contract
             PROPERTIES TIMEOUT 90 ENVIRONMENT "${so101_environment}")
     endif()
     if(MANIPULATION_ENABLE_NERO)
@@ -215,6 +258,10 @@ if(BUILD_TESTING)
             ENVIRONMENT "${nero_environment}")
     endif()
     if(MANIPULATION_ENABLE_CALIBRATION)
+        add_test(NAME manipulation_calibration_session_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_calibration_session.py)
+        set_tests_properties(manipulation_calibration_session_contract PROPERTIES TIMEOUT 120
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;PYTHONNOUSERSITE=1")
         add_executable(manipulation_calibration_test tests/calibration_test.cpp)
         target_include_directories(manipulation_calibration_test PRIVATE ${OpenCV_INCLUDE_DIRS})
         target_link_libraries(manipulation_calibration_test PRIVATE manipulation_calibration

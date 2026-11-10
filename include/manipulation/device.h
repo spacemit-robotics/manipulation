@@ -7,8 +7,8 @@
  * No vendor types. End-effector positions are normalized per channel: 0 closed, 1 open, on every
  * end effector.
  */
-#ifndef MANIPULATION_DEVICE_H_
-#define MANIPULATION_DEVICE_H_
+#ifndef DEVICE_H
+#define DEVICE_H
 
 #include <functional>
 #include <map>
@@ -43,6 +43,8 @@ struct EffectorConfig {
     double timeout_s = 5;
     /// Oldest feedback sample accepted as current, (0, 1] s.
     double maximum_age_s = 0.2;
+    /// Physical connection resource. Empty inherits the arm resource in legacy device plans.
+    std::string resource_id{};
 };
 
 /// One end-effector feedback sample.
@@ -169,6 +171,41 @@ struct DeviceDriver {
     std::function<DriverOptions(const DriverOptions&, const std::string&)> resolve_options{};
 };
 
+/// An independently selectable arm driver. Factories never connect to hardware.
+struct ArmDriver {
+    std::string id;
+    unsigned interface_version = 1;
+    std::function<void(const DeviceConfig&, const DriverOptions&)> validate;
+    std::function<std::unique_ptr<Arm>(const DeviceConfig&, const DriverOptions&)> create;
+    std::function<DriverOptions(const DriverOptions&, const std::string&)> resolve_options{};
+};
+
+/// An independently selectable end-effector driver. Factories never connect to hardware.
+struct EffectorDriver {
+    std::string id;
+    unsigned interface_version = 1;
+    std::function<void(const EffectorConfig&, const DriverOptions&)> validate;
+    std::function<std::unique_ptr<EndEffector>(const EffectorConfig&, const DriverOptions&)> create;
+    std::function<DriverOptions(const DriverOptions&, const std::string&)> resolve_options{};
+};
+
+/**
+ * @brief Explicit support for two roles sharing one physical connection.
+ *
+ * Independent drivers claiming the same resource are rejected unless this pair is registered.
+ * The factory must create both roles over one shared connection, without connecting it.
+ */
+struct SharedDeviceDriver {
+    std::string arm_driver;
+    std::string effector_driver;
+    std::function<void(const DeviceDefinition&, const DriverOptions&, const DriverOptions&)>
+            validate;
+    std::function<Devices(const DeviceDefinition&, const DriverOptions&, const DriverOptions&)>
+            create;
+};
+
+struct DeviceComposition;
+
 /// Registered drivers by name.
 class DeviceRegistry {
 public:
@@ -177,6 +214,24 @@ public:
      * @throws std::runtime_error If the driver is incomplete or its name is already registered.
      */
     void Register(DeviceDriver driver);
+    /// Register an independently selectable arm; rejects incomplete or duplicate registrations.
+    void RegisterArm(ArmDriver driver);
+    /// Register an independently selectable end effector.
+    void RegisterEffector(EffectorDriver driver);
+    /// Register an explicitly supported shared-connection pair after registering its two roles.
+    void RegisterShared(SharedDeviceDriver driver);
+    /// Resolve one registered role; throws if unknown.
+    const ArmDriver& GetArm(const std::string& id) const;
+    const EffectorDriver& GetEffector(const std::string& id) const;
+    /// Names of independently selectable drivers, in lexical order.
+    std::vector<std::string> ListArms() const;
+    std::vector<std::string> ListEffectors() const;
+    /// Validate independent selections and shared-resource compatibility without connecting.
+    void ValidateComposition(
+            const DeviceDefinition& definition, const DeviceComposition& composition) const;
+    /// Build independent roles or an explicitly registered shared connection; never connects.
+    Devices CreateComposition(
+            const DeviceDefinition& definition, const DeviceComposition& composition) const;
     /**
      * @brief Registered driver by name.
      * @throws std::runtime_error If no driver has this name.
@@ -189,16 +244,19 @@ public:
      * @throws std::runtime_error If the driver is unknown or rejects the configuration.
      */
     void Validate(const std::string& id, const DeviceDefinition& definition,
-                  const DriverOptions& options) const;
+            const DriverOptions& options) const;
     /**
      * @brief Validate, then create the driver instances; nothing is connected.
      * @throws std::runtime_error If validation fails or the driver returns no arm.
      */
     Devices Create(const std::string& id, const DeviceDefinition& definition,
-                   const DriverOptions& options) const;
+            const DriverOptions& options) const;
 
 private:
     std::map<std::string, DeviceDriver> drivers_;
+    std::map<std::string, ArmDriver> arms_;
+    std::map<std::string, EffectorDriver> effectors_;
+    std::map<std::pair<std::string, std::string>, SharedDeviceDriver> shared_;
 };
 
 /// Registry with every driver built into this installation.
@@ -213,8 +271,9 @@ void ValidateEffector(const EffectorConfig& config);
 /**
  * @brief Owns one device and executes commands with completion checks.
  *
- * Calls are serialized by the owner. One host-wide lease per arm resource_id covers the whole
- * assembly. A failure latches the whole assembly until Disconnect() and Connect(); reconnecting
+ * Calls are serialized by the owner. All physical resource leases are acquired in lexical order
+ * before any driver connects. Shared resources acquire only one lease. A failure latches the
+ * whole assembly until Disconnect() and Connect(); reconnecting
  * never enables, homes or replays a task. A CommandRejected from a move means nothing was written
  * and nothing is latched.
  *
@@ -269,7 +328,7 @@ public:
      * @return Result with the same completion rules as MoveArm().
      */
     CommandResult JogArm(std::size_t joint_index, double delta_rad, double speed_scale = 0.05,
-                         const std::function<bool()>& cancelled = {});
+            const std::function<bool()>& cancelled = {});
     /**
      * @brief Move to a joint point and block until completion, failure or cancellation.
      *
@@ -297,16 +356,16 @@ public:
      *        target has been sent and had its duration_s; the result is then kUnverified.
      */
     CommandResult MoveArmTrajectory(const JointTrajectory& trajectory,
-                                    const std::function<bool()>& cancelled = {},
-                                    const std::vector<TimedEffectorPoint>& effector = {});
+            const std::function<bool()>& cancelled = {},
+            const std::vector<TimedEffectorPoint>& effector = {});
     /**
      * @brief Move the end effector and block until completion, failure or cancellation.
      *
      * @return kSucceeded on measured arrival or a detected grasp; kUnverified without position
      *         feedback.
      */
-    CommandResult MoveEffector(const EffectorPoint& point,
-                               const std::function<bool()>& cancelled = {});
+    CommandResult MoveEffector(
+            const EffectorPoint& point, const std::function<bool()>& cancelled = {});
     /**
      * @brief As FollowArm() for the end effector.
      *
@@ -324,8 +383,8 @@ public:
 private:
     void Ready() const;
     CommandResult RunArm(const std::function<CommandResult()>& submit,
-                         const std::function<bool()>& cancelled,
-                         const std::vector<TimedEffectorPoint>& effector = {});
+            const std::function<bool()>& cancelled,
+            const std::vector<TimedEffectorPoint>& effector = {});
     void CheckEffectorPoint(const EffectorPoint& point) const;
     void SetEffectorEnabled(bool enabled);
     struct Impl;
@@ -333,4 +392,4 @@ private:
 };
 
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_DEVICE_H_
+#endif  // DEVICE_H

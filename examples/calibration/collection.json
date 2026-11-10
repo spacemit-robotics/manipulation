@@ -1,0 +1,12 @@
+{
+    "schema_version": 1,
+    "installation_id": "workcell-01",
+    "device_plan": "device.yaml",
+    "model": "model.json",
+    "sampler": {
+        "module": "spacemit_manipulation.charuco_sampler",
+        "options": {
+            "board": "board.json"
+        }
+    }
+}

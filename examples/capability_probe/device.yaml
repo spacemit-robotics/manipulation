@@ -1,0 +1,13 @@
+# Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+# SPDX-License-Identifier: Apache-2.0
+schema_version: 3
+device:
+  driver: mock_device
+  arm:
+    device_id: arm
+    resource_id: capability_probe_mock
+    joints:
+      - {name: joint1, minimum_rad: -1, maximum_rad: 1}
+steps:
+  - {capability: joint_point, target_rad: [0.1], speed_scale: 0.05}
+  - {capability: assert_joint_position, target_rad: [0.1], tolerance_rad: 0.01}

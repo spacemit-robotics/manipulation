@@ -67,14 +67,8 @@ public:
 
     EffectorState Read() override {
         if (!connected_) throw std::runtime_error("mock effector not connected");
-        return {feedback_ ? positions_ : std::vector<double>{},
-                Clock::now(),
-                ++sample_,
-                true,
-                false,
-                false,
-                "mock",
-                enabled_};
+        return {feedback_ ? positions_ : std::vector<double>{}, Clock::now(), ++sample_, true,
+                false, false, "mock", enabled_};
     }
 
     void Enable() override { enabled_ = true; }
@@ -96,20 +90,46 @@ private:
 
 void RegisterMockDevice(DeviceRegistry* registry) {
     registry->Register({"mock_device", 1,
-                        [](const DeviceDefinition&, const DriverOptions& options) {
-                            if (!options.empty())
-                                throw std::runtime_error("mock_device has no options");
-                        },
-                        [](const DeviceDefinition& definition, const DriverOptions&) {
-                            Devices devices;
-                            devices.arm = std::make_unique<MockArm>(definition.arm.joints.size());
-                            if (!definition.effector.channels.empty()) {
-                                devices.effector = std::make_unique<MockEffector>(
-                                        definition.effector.channels.size(),
-                                        definition.effector.feedback ==
-                                                EffectorFeedback::kPosition);
-                            }
-                            return devices;
-                        }});
+            [](const DeviceDefinition&, const DriverOptions& options) {
+                if (!options.empty()) throw std::runtime_error("mock_device has no options");
+            },
+            [](const DeviceDefinition& definition, const DriverOptions&) {
+                Devices devices;
+                devices.arm = std::make_unique<MockArm>(definition.arm.joints.size());
+                if (!definition.effector.channels.empty()) {
+                    devices.effector =
+                            std::make_unique<MockEffector>(definition.effector.channels.size(),
+                                    definition.effector.feedback == EffectorFeedback::kPosition);
+                }
+                return devices;
+            }});
+    const auto validate_options = [](const DriverOptions& options) {
+        if (!options.empty()) throw std::runtime_error("mock driver has no options");
+    };
+    registry->RegisterArm({"mock", 1,
+            [validate_options](const DeviceConfig&, const DriverOptions& options) {
+                validate_options(options);
+            },
+            [](const DeviceConfig& config, const DriverOptions&) {
+                return std::make_unique<MockArm>(config.joints.size());
+            }});
+    registry->RegisterEffector({"mock", 1,
+            [validate_options](const EffectorConfig&, const DriverOptions& options) {
+                validate_options(options);
+            },
+            [](const EffectorConfig& config, const DriverOptions&) {
+                return std::make_unique<MockEffector>(
+                        config.channels.size(), config.feedback == EffectorFeedback::kPosition);
+            }});
+    registry->RegisterShared({"mock", "mock",
+            [](const DeviceDefinition&, const DriverOptions&, const DriverOptions&) {},
+            [](const DeviceDefinition& definition, const DriverOptions&, const DriverOptions&) {
+                Devices devices;
+                devices.arm = std::make_unique<MockArm>(definition.arm.joints.size());
+                devices.effector =
+                        std::make_unique<MockEffector>(definition.effector.channels.size(),
+                                definition.effector.feedback == EffectorFeedback::kPosition);
+                return devices;
+            }});
 }
 }  // namespace spacemit::manipulation

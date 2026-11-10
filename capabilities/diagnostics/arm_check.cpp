@@ -13,10 +13,11 @@ constexpr double kSpeed = 0.01;
 }  // namespace
 
 int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool timeout_only,
-                const std::function<bool()>& interrupted, std::ostream& out) {
-    auto definition = plan.definition;
+        const std::function<bool()>& interrupted, std::ostream& out) {
+    auto checked_plan = plan;
+    auto& definition = checked_plan.definition;
     definition.arm.tolerance_rad = 0.002;
-    DeviceSession session(definition, registry.Create(plan.driver, definition, plan.options));
+    DeviceSession session(definition, CreatePlanDevices(checked_plan, registry));
     session.Connect();
     session.Diagnose();
     const auto before = session.ReadArm();
@@ -26,7 +27,7 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
     }
     for (std::size_t i = 0; i < before.joints_rad.size(); ++i) {
         if (before.joints_rad[i] < definition.arm.joints[i].minimum_rad ||
-            before.joints_rad[i] > definition.arm.joints[i].maximum_rad) {
+                before.joints_rad[i] > definition.arm.joints[i].maximum_rad) {
             throw std::runtime_error("actual pose outside declared limits; refusing any motion");
         }
     }
@@ -37,10 +38,10 @@ int RunArmCheck(const DevicePlan& plan, const DeviceRegistry& registry, bool tim
 
     if (timeout_only) {
         session.Disconnect();  // Release the lease for a session with a 1 ms deadline.
-        auto fast = definition;
-        fast.arm.timeout_s = 0.001;
+        auto fast_plan = checked_plan;
+        fast_plan.definition.arm.timeout_s = 0.001;
         {
-            DeviceSession quick(fast, registry.Create(plan.driver, fast, plan.options));
+            DeviceSession quick(fast_plan.definition, CreatePlanDevices(fast_plan, registry));
             quick.Connect();
             quick.Diagnose();
             if (interrupted()) return 1;

@@ -57,7 +57,19 @@ def assert_still(poses, position_m=0.0005, angle_deg=0.2):
         raise ValueError("arm moved during capture; sample rejected")
 
 
-def capture_sample(port, camera, detector, window=None, discard=5, frames=3):
+def capture_sample(
+    port,
+    camera,
+    detector,
+    window=None,
+    discard=5,
+    frames=3,
+    *,
+    frame_check=None,
+    frame_observer=None,
+    keep_corner_pixels=False,
+    recording_source="spacemit_cpp_distinct_feedback_urdf_fk",
+):
     """Return (record, image, annotated) for one stationary pose, or raise with the reason.
 
     The flange pose is read before and after every frame; the arm must stay within 0.5 mm / 0.2 deg,
@@ -66,6 +78,8 @@ def capture_sample(port, camera, detector, window=None, discard=5, frames=3):
     """
     import numpy as np
 
+    if type(discard) is not int or discard < 0 or type(frames) is not int or frames < 2:
+        raise ValueError("sampling requires nonnegative discard and at least two frames")
     poses = []
     for _ in range(8):
         poses.append(port.read())
@@ -74,18 +88,66 @@ def capture_sample(port, camera, detector, window=None, discard=5, frames=3):
     joints_before = port.read_joints()
     discarded = []
     for _ in range(discard):
-        camera.capture()
+        frame = camera.capture()
         discarded.append(port.read_joints())
+        if frame_check is not None:
+            frame_check(frame)
     started = time.monotonic()
     observations = []
-    for _ in range(frames):
+    for frame_index in range(frames):
         poses.append(port.read())
         image = camera.capture()
+        captured_at = time.time()
         frame_joints = port.read_joints()
-        board, quality, annotated = detector.detect(image, camera.camera_matrix, camera.dist_coeffs)
-        if window is not None:
-            inside_window(quality["corner_pixels"], window)
-        poses.append(port.read())
+        board = quality = annotated = None
+        frame_record = {
+            "frame_index": frame_index,
+            "time_unix_s": captured_at,
+            "T_base_flange_before": poses[-1].tolist(),
+            "joint_observation": frame_joints,
+        }
+        if frame_observer is not None:
+            frame_record.update(
+                camera=camera.info,
+                board=detector.cfg,
+                transform_units="metres",
+                joint_units="radians_and_degrees",
+            )
+        try:
+            board, quality, annotated = detector.detect(
+                image, camera.camera_matrix, camera.dist_coeffs
+            )
+            if window is not None:
+                inside_window(quality["corner_pixels"], window)
+            if frame_check is not None:
+                frame_check(image, board)
+            poses.append(port.read())
+            frame_record["T_base_flange_after"] = poses[-1].tolist()
+        except BaseException as error:
+            if frame_observer is not None:
+                frame_observer(
+                    image,
+                    annotated,
+                    dict(
+                        frame_record,
+                        status="rejected",
+                        error=str(error) or type(error).__name__,
+                        quality=quality,
+                        T_camera_board=None if board is None else board.tolist(),
+                    ),
+                )
+            raise
+        if frame_observer is not None:
+            frame_observer(
+                image,
+                annotated,
+                dict(
+                    frame_record,
+                    status="detected",
+                    quality=quality,
+                    T_camera_board=board.tolist(),
+                ),
+            )
         observations.append((board, quality, image, annotated, poses[-1], frame_joints))
     assert_still(poses)
     if any(
@@ -101,9 +163,21 @@ def capture_sample(port, camera, detector, window=None, discard=5, frames=3):
         np.abs(np.asarray(joints_after["joints_rad"]) - joints_before["joints_rad"])
     ) > math.radians(0.2):
         raise ValueError("joints moved during calibration sample")
-    quality = {key: value for key, value in quality.items() if key != "corner_pixels"}
+    if not keep_corner_pixels:
+        quality = {key: value for key, value in quality.items() if key != "corner_pixels"}
+    archive_selection = (
+        {
+            "selected_frame_index": min(
+                range(len(observations)),
+                key=lambda index: observations[index][1]["reprojection_rms_px"],
+            )
+        }
+        if frame_observer is not None
+        else {}
+    )
     return (
         dict(
+            **archive_selection,
             T_base_flange=flange.tolist(),
             T_camera_board=board.tolist(),
             joints_rad=joints_after["joints_rad"],
@@ -111,7 +185,7 @@ def capture_sample(port, camera, detector, window=None, discard=5, frames=3):
             joint_observations=dict(before=joints_before, after=joints_after),
             frame_joint_observations=[o[5] for o in observations],
             discarded_frame_joint_observations=discarded,
-            joint_recording_source="spacemit_cpp_distinct_feedback_urdf_fk",
+            joint_recording_source=recording_source,
             quality=quality,
             time_unix_s=time.time(),
             capture_duration_s=time.monotonic() - started,

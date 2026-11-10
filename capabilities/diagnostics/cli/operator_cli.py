@@ -334,6 +334,11 @@ def main():
     check = commands.add_parser("check", help="verify dependencies without opening hardware")
     check.add_argument("--profile", choices=("build", "control", "vision"), default="control")
     commands.add_parser("demo", help="run the Mock arm and hand point task; no hardware")
+    drivers = commands.add_parser("drivers", help="list registered device drivers")
+    drivers.add_argument("--roles", action="store_true", help="list arm and effector drivers")
+    task = commands.add_parser("run", help="execute the configured capability steps in order")
+    task.add_argument("--plan", required=True, help="device and task configuration")
+    task.add_argument("--enable", action="store_true", help="explicitly enable the arm first")
     configure = commands.add_parser(
         "configure",
         help="create SITE/MODEL/device.yaml from a model template and make it the current device",
@@ -500,6 +505,12 @@ def main():
         )
     elif args.operation == "demo":
         context.execute([device, "run", context.data("manipulation") / "examples/mock_device.yaml"])
+    elif args.operation == "drivers":
+        context.execute([device, "driver-roles" if args.roles else "drivers"])
+    elif args.operation == "run":
+        context.execute(
+            [device, "run", context.plan(args.plan), *(["--enable"] if args.enable else [])]
+        )
     elif args.operation == "configure":
         context.check_selectable()
         tool = load_tool(context.data("manipulation") / "tools/configure_device.py")

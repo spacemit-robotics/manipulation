@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Local bounded JSONL binding; one serialized device writer, out-of-band cancellation.
 #include "device_service.h"
+#include "manipulation/capability.h"
+#include "manipulation/device_plan.h"
 #include <poll.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
@@ -97,20 +99,30 @@ std::string DeviceCapabilitiesJson(const m::DeviceSession& session) {
     } else {
         out << "null";
     }
-    return out.str() + '}';
+    out << ",\"registered\":[";
+    const auto registered =
+            m::MakeBuiltinCapabilityRegistry().Describe(m::DescribeSessionCapabilities(session));
+    for (std::size_t i = 0; i < registered.size(); ++i) {
+        const auto& capability = registered[i];
+        out << (i ? "," : "") << "{\"id\":" << Quote(capability.id)
+            << ",\"supported\":" << capability.supported
+            << ",\"reason\":" << Quote(capability.reason)
+            << ",\"description\":" << Quote(capability.description) << '}';
+    }
+    return out.str() + "]}";
 }
 
 std::string DeviceStateJson(m::DeviceSession& session) {
     const auto arm = session.ReadArm();
     std::string data = "{\"joints_rad\":" + Values(arm.joints_rad) +
-                       ",\"enabled\":" + (arm.enabled ? "true" : "false") +
-                       ",\"position_mode\":" + (arm.position_mode ? "true" : "false") +
-                       ",\"moving\":" + (arm.moving ? "true" : "false") +
-                       ",\"fault\":" + (arm.fault ? "true" : "false") +
-                       ",\"latched\":" + (session.Latched() ? "true" : "false") +
-                       ",\"firmware\":" + Quote(arm.firmware) +
-                       ",\"arm_sample_id\":" + std::to_string(arm.sample_id) +
-                       ",\"source_time_s\":" + std::to_string(arm.source_time_s);
+            ",\"enabled\":" + (arm.enabled ? "true" : "false") +
+            ",\"position_mode\":" + (arm.position_mode ? "true" : "false") +
+            ",\"moving\":" + (arm.moving ? "true" : "false") +
+            ",\"fault\":" + (arm.fault ? "true" : "false") +
+            ",\"latched\":" + (session.Latched() ? "true" : "false") +
+            ",\"firmware\":" + Quote(arm.firmware) +
+            ",\"arm_sample_id\":" + std::to_string(arm.sample_id) +
+            ",\"source_time_s\":" + std::to_string(arm.source_time_s);
     if (!arm.controller_limits.empty())
         data += ",\"controller_limits\":" + Limits(arm.controller_limits);
     if (session.HasEffector()) {
@@ -129,19 +141,18 @@ std::string DeviceStateJson(m::DeviceSession& session) {
 }
 
 int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
-                const std::function<bool()>& interrupted, const std::string& driver,
-                bool allow_disable, bool allow_effector_enable, bool allow_effector_disable) {
+        const std::function<bool()>& interrupted, const std::string& driver, bool allow_disable,
+        bool allow_effector_enable, bool allow_effector_disable) {
     std::mutex mutex, output_mutex;
     std::condition_variable changed;
     std::deque<YAML::Node> pending;
     std::atomic<bool> stopped{false};
     std::atomic<std::uint64_t> cancelled{0}, active{0};
-    auto reply = [&](std::uint64_t id, bool ok, const std::string& data,
-                     const std::string& extra = "") {
+    auto respond_json = [&](std::uint64_t id, bool ok, const std::string& data,
+                                const std::string& extra = "") {
         std::lock_guard<std::mutex> guard(output_mutex);
-        std::cout << "{\"v\":1,\"id\":" << id << ",\"ok\":" << (ok ? "true" : "false")
-                  << (ok ? ",\"data\":" : ",\"error\":") << data << extra << "}\n"
-                  << std::flush;
+        std::cout << "{\"v\":1,\"id\":" << id << ",\"ok\":" << (ok ? "true" : "false");
+        std::cout << (ok ? ",\"data\":" : ",\"error\":") << data << extra << "}\n" << std::flush;
         if (!std::cout) {
             stopped = true;
             cancelled = active.load();
@@ -150,13 +161,13 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
     };
     // rejected: refused before anything was written. latched: the session needs a reconnect.
     auto fail = [&](std::uint64_t id, const std::string& message, bool rejected) {
-        reply(id, false, Quote(message),
-              std::string(",\"rejected\":") + (rejected ? "true" : "false") +
-                      ",\"latched\":" + (session.Latched() ? "true" : "false"));
+        respond_json(id, false, Quote(message),
+                std::string(",\"rejected\":") + (rejected ? "true" : "false") +
+                        ",\"latched\":" + (session.Latched() ? "true" : "false"));
     };
-    std::cout << "{\"v\":1,\"event\":\"ready\",\"motion_allowed\":"
-              << (allow_motion ? "true" : "false") << ",\"driver\":" << Quote(driver) << "}\n"
-              << std::flush;
+    std::cout << "{\"v\":1,\"event\":\"ready\",\"motion_allowed\":";
+    std::cout << (allow_motion ? "true" : "false");
+    std::cout << ",\"driver\":" << Quote(driver) << "}\n" << std::flush;
     if (!std::cout) return 2;
     std::thread reader([&] {
         std::string buffer;
@@ -194,19 +205,21 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                         const auto target = node["target_id"].as<std::uint64_t>();
                         std::lock_guard<std::mutex> guard(mutex);
                         if (target == 0 ||
-                            (target != active &&
-                             (pending.empty() ||
-                              target != pending.front()["id"].as<std::uint64_t>()))) {
-                            reply(id, false, Quote("no matching active/pending command"));
+                                (target != active &&
+                                        (pending.empty() ||
+                                                target !=
+                                                        pending.front()["id"]
+                                                                .as<std::uint64_t>()))) {
+                            respond_json(id, false, Quote("no matching active/pending command"));
                         } else {
                             cancelled = target;
-                            reply(id, true, "{\"cancel_requested\":true}");
+                            respond_json(id, true, "{\"cancel_requested\":true}");
                         }
                         continue;
                     }
                     std::lock_guard<std::mutex> guard(mutex);
                     if (!pending.empty())
-                        reply(id, false, Quote("bounded device queue busy"));
+                        respond_json(id, false, Quote("bounded device queue busy"));
                     else {
                         pending.push_back(node);
                         changed.notify_one();
@@ -214,7 +227,7 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                 }
             }
         } catch (const std::exception& error) {
-            reply(0, false, Quote(error.what()));
+            respond_json(0, false, Quote(error.what()));
         }
         stopped = true;
         cancelled = active.load();
@@ -226,7 +239,7 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
         {
             std::unique_lock<std::mutex> guard(mutex);
             changed.wait_for(guard, std::chrono::milliseconds(100),
-                             [&] { return stopped || !pending.empty(); });
+                    [&] { return stopped || !pending.empty(); });
             if (stopped) break;
             if (pending.empty()) continue;
             request = pending.front();
@@ -237,18 +250,18 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
         try {
             const auto op = request["op"].as<std::string>();
             auto allowed = std::set<std::string>{"v", "id", "op", "deadline_ns"};
+            if (op == "capability") allowed.insert("step");
             if (op == "arm_point") {
                 allowed.insert({"target_rad", "speed_scale", "tolerance_rad", "wait_for_arrival",
-                                "resend_interval_s"});
+                        "resend_interval_s"});
             }
             if (op == "arm_trajectory") {
                 allowed.insert({"times_s", "positions_rad", "command_rate_hz", "max_step_rad",
-                                "speed_scale", "tolerance_rad", "wait_for_arrival",
-                                "effector_schedule"});
+                        "speed_scale", "tolerance_rad", "wait_for_arrival", "effector_schedule"});
             }
             if (op == "arm_path") {
                 allowed.insert({"path_rad", "speed_scale", "max_velocity_rad_s",
-                                "max_acceleration_rad_s2", "tolerance_rad"});
+                        "max_acceleration_rad_s2", "tolerance_rad"});
             }
             if (op == "arm_follow") allowed.insert({"target_rad", "speed_scale"});
             if (op == "effector_position" || op == "effector_follow")
@@ -297,81 +310,96 @@ int ServeDevice(m::DeviceSession& session, bool allow_motion, bool allow_enable,
                     data = "{\"status\":\"succeeded\"}";
                 } else {
                     m::CommandResult result;
-                    if (op == "arm_hold") {
+                    if (op == "capability") {
+                        const auto registry = m::MakeBuiltinCapabilityRegistry();
+                        m::DeviceStep step;
+                        try {
+                            step = registry.Parse(
+                                    request["step"], m::DescribeSessionCapabilities(session));
+                        } catch (const std::exception& error) {
+                            // Parsing and validation are offline: no device write has occurred.
+                            throw m::CommandRejected(error.what());
+                        }
+                        result = registry.Execute(session, step, is_cancelled);
+                    } else if (op == "arm_hold") {
                         result = session.HoldArm();
                     } else if (op == "effector_hold") {
                         result = session.HoldEffector();
                     } else if (op == "arm_jog") {
                         result = session.JogArm(request["joint_index"].as<std::size_t>(),
-                                                request["delta_rad"].as<double>(),
-                                                request["speed_scale"].as<double>(), is_cancelled);
+                                request["delta_rad"].as<double>(),
+                                request["speed_scale"].as<double>(), is_cancelled);
                     } else if (op == "arm_point") {
                         result = session.MoveArm(
                                 {request["target_rad"].as<std::vector<double>>(),
-                                 request["speed_scale"].as<double>(),
-                                 request["tolerance_rad"] ? request["tolerance_rad"].as<double>()
-                                                          : 0.0,
-                                 !request["wait_for_arrival"] ||
-                                         request["wait_for_arrival"].as<bool>(),
-                                 request["resend_interval_s"]
-                                         ? request["resend_interval_s"].as<double>()
-                                         : 0.0},
+                                        request["speed_scale"].as<double>(),
+                                        request["tolerance_rad"]
+                                                ? request["tolerance_rad"].as<double>()
+                                                : 0.0,
+                                        !request["wait_for_arrival"] ||
+                                                request["wait_for_arrival"].as<bool>(),
+                                        request["resend_interval_s"]
+                                                ? request["resend_interval_s"].as<double>()
+                                                : 0.0},
                                 is_cancelled);
                     } else if (op == "arm_follow") {
                         result = session.FollowArm({request["target_rad"].as<std::vector<double>>(),
-                                                    request["speed_scale"].as<double>()});
+                                request["speed_scale"].as<double>()});
                     } else if (op == "effector_follow") {
                         result = session.FollowEffector(
                                 {request["positions"].as<std::vector<double>>(),
-                                 request["duration_s"].as<double>()});
+                                        request["duration_s"].as<double>()});
                     } else if (op == "arm_trajectory") {
                         std::vector<m::TimedEffectorPoint> schedule;
                         for (const auto& item : request["effector_schedule"]) {
                             Keys(item, {"at_s", "positions", "duration_s"});
                             schedule.push_back({item["at_s"].as<double>(),
-                                                {item["positions"].as<std::vector<double>>(),
-                                                 item["duration_s"].as<double>()}});
+                                    {item["positions"].as<std::vector<double>>(),
+                                            item["duration_s"].as<double>()}});
                         }
                         result = session.MoveArmTrajectory(
                                 {request["times_s"].as<std::vector<double>>(),
-                                 request["positions_rad"].as<std::vector<std::vector<double>>>(),
-                                 request["command_rate_hz"].as<double>(),
-                                 request["max_step_rad"].as<double>(),
-                                 request["speed_scale"].as<double>(),
-                                 request["tolerance_rad"] ? request["tolerance_rad"].as<double>()
-                                                          : 0.0,
-                                 !request["wait_for_arrival"] ||
-                                         request["wait_for_arrival"].as<bool>()},
+                                        request["positions_rad"]
+                                                .as<std::vector<std::vector<double>>>(),
+                                        request["command_rate_hz"].as<double>(),
+                                        request["max_step_rad"].as<double>(),
+                                        request["speed_scale"].as<double>(),
+                                        request["tolerance_rad"]
+                                                ? request["tolerance_rad"].as<double>()
+                                                : 0.0,
+                                        !request["wait_for_arrival"] ||
+                                                request["wait_for_arrival"].as<bool>()},
                                 is_cancelled, schedule);
                     } else if (op == "arm_path") {
                         result = session.MoveArmPath(
                                 {request["path_rad"].as<std::vector<std::vector<double>>>(),
-                                 request["max_velocity_rad_s"].as<double>(),
-                                 request["max_acceleration_rad_s2"].as<double>(),
-                                 request["speed_scale"].as<double>(),
-                                 request["tolerance_rad"] ? request["tolerance_rad"].as<double>()
-                                                          : 0.0},
+                                        request["max_velocity_rad_s"].as<double>(),
+                                        request["max_acceleration_rad_s2"].as<double>(),
+                                        request["speed_scale"].as<double>(),
+                                        request["tolerance_rad"]
+                                                ? request["tolerance_rad"].as<double>()
+                                                : 0.0},
                                 is_cancelled);
                     } else if (op == "effector_position") {
                         result = session.MoveEffector(
                                 {request["positions"].as<std::vector<double>>(),
-                                 request["duration_s"].as<double>()},
+                                        request["duration_s"].as<double>()},
                                 is_cancelled);
                     } else {
                         throw std::runtime_error("unsupported operation");
                     }
                     data = "{\"status\":" + Quote(m::ResultName(result.status)) +
-                           ",\"detail\":" + Quote(result.detail) + ",\"physical_grip_verified\":" +
-                           // Only measured grasp evidence (stopped on an object under load)
-                           // verifies a grip.
-                           (result.detail == "effector_grasp_holding" ? "true" : "false") + '}';
+                            ",\"detail\":" + Quote(result.detail) + ",\"physical_grip_verified\":" +
+                            // Only measured grasp evidence (stopped on an object under load)
+                            // verifies a grip.
+                            (result.detail == "effector_grasp_holding" ? "true" : "false") + '}';
                 }
             }
             if (Now() >= deadline) {
                 deadline_latched = true;
                 throw std::runtime_error("deadline exceeded; do not replay or infer physical stop");
             }
-            reply(id, true, data);
+            respond_json(id, true, data);
         } catch (const m::CommandRejected& error) {
             fail(id, error.what(), true);
         } catch (const std::exception& error) {

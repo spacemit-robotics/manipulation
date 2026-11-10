@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "arm_session.h"
+#include "manipulation/device_composition.h"
 
 namespace spacemit::manipulation {
 namespace {
@@ -24,12 +25,12 @@ void CheckArmHolds(const ArmState& arm, bool settling) {
     Check(arm.enabled, "arm is not enabled; enable the arm before moving the end effector");
     Check(arm.position_mode, "arm is not in position mode; tool motion refused");
     Check(!arm.moving || settling,
-          "arm is moving; wait until it stops before moving the end effector");
+            "arm is moving; wait until it stops before moving the end effector");
 }
 
 bool Failed(Result status) {
     return status == Result::kFault || status == Result::kTimedOut ||
-           status == Result::kStopUnknown;
+            status == Result::kStopUnknown;
 }
 
 constexpr double kToolArmDrift = 3.14159265358979323846 / 180;  // 1 degree
@@ -44,31 +45,37 @@ void EndEffector::Disable() {
 }
 
 void ValidateEffector(const EffectorConfig& config) {
+    Check(config.resource_id.empty() ||
+                    (config.resource_id.size() <= 80 &&
+                            config.resource_id.find_first_not_of(
+                                    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+                                    "_-") == std::string::npos),
+            "invalid effector resource_id");
     if (config.channels.empty()) return;
     Check(!config.device_id.empty() && config.channels.size() <= 32,
-          "invalid effector identity/channels");
+            "invalid effector identity/channels");
     std::set<std::string> names;
     for (const auto& channel : config.channels) {
         Check(!channel.empty() && channel.size() <= 80 && names.insert(channel).second,
-              "invalid channel name");
+                "invalid channel name");
     }
     Check(std::isfinite(config.tolerance) && config.tolerance > 0 && config.tolerance <= 0.1,
-          "invalid effector tolerance");
+            "invalid effector tolerance");
     Check(std::isfinite(config.timeout_s) && config.timeout_s > 0 && config.timeout_s <= 120,
-          "invalid effector timeout");
+            "invalid effector timeout");
     Check(std::isfinite(config.maximum_age_s) && config.maximum_age_s > 0 &&
-                  config.maximum_age_s <= 1,
-          "invalid effector feedback age");
+                    config.maximum_age_s <= 1,
+            "invalid effector feedback age");
 }
 
 void DeviceRegistry::Register(DeviceDriver driver) {
     Check(!driver.id.empty() && driver.interface_version == 1 && driver.validate && driver.create,
-          "invalid device driver registration");
+            "invalid device driver registration");
     Check(std::isfinite(driver.minimum_arm_speed_scale) && driver.minimum_arm_speed_scale >= 0 &&
-                  driver.minimum_arm_speed_scale <= 1 &&
-                  std::isfinite(driver.maximum_effector_duration_s) &&
-                  driver.maximum_effector_duration_s > 0,
-          "invalid device capability metadata");
+                    driver.minimum_arm_speed_scale <= 1 &&
+                    std::isfinite(driver.maximum_effector_duration_s) &&
+                    driver.maximum_effector_duration_s > 0,
+            "invalid device capability metadata");
     const auto id = driver.id;
     Check(drivers_.emplace(id, std::move(driver)).second, "duplicate device driver");
 }
@@ -86,7 +93,7 @@ std::vector<std::string> DeviceRegistry::List() const {
 }
 
 void DeviceRegistry::Validate(const std::string& id, const DeviceDefinition& definition,
-                              const DriverOptions& options) const {
+        const DriverOptions& options) const {
     ValidateDevice(definition.arm);
     ValidateEffector(definition.effector);
     const auto found = drivers_.find(id);
@@ -95,12 +102,103 @@ void DeviceRegistry::Validate(const std::string& id, const DeviceDefinition& def
 }
 
 Devices DeviceRegistry::Create(const std::string& id, const DeviceDefinition& definition,
-                               const DriverOptions& options) const {
+        const DriverOptions& options) const {
     Validate(id, definition, options);
     auto devices = drivers_.at(id).create(definition, options);
     Check(devices.arm != nullptr &&
-                  static_cast<bool>(devices.effector) == !definition.effector.channels.empty(),
-          "driver device composition mismatch");
+                    static_cast<bool>(devices.effector) == !definition.effector.channels.empty(),
+            "driver device composition mismatch");
+    return devices;
+}
+
+void DeviceRegistry::RegisterArm(ArmDriver driver) {
+    Check(!driver.id.empty() && driver.interface_version == 1 && driver.validate && driver.create,
+            "invalid arm driver registration");
+    const auto id = driver.id;
+    Check(arms_.emplace(id, std::move(driver)).second, "duplicate arm driver");
+}
+
+void DeviceRegistry::RegisterEffector(EffectorDriver driver) {
+    Check(!driver.id.empty() && driver.interface_version == 1 && driver.validate && driver.create,
+            "invalid effector driver registration");
+    const auto id = driver.id;
+    Check(effectors_.emplace(id, std::move(driver)).second, "duplicate effector driver");
+}
+
+void DeviceRegistry::RegisterShared(SharedDeviceDriver driver) {
+    Check(arms_.count(driver.arm_driver) && effectors_.count(driver.effector_driver) &&
+                    driver.validate && driver.create,
+            "invalid shared connection registration");
+    const auto key = std::make_pair(driver.arm_driver, driver.effector_driver);
+    Check(shared_.emplace(key, std::move(driver)).second, "duplicate shared connection");
+}
+
+const ArmDriver& DeviceRegistry::GetArm(const std::string& id) const {
+    const auto found = arms_.find(id);
+    if (found == arms_.end()) throw std::runtime_error("unknown arm driver: " + id);
+    return found->second;
+}
+
+const EffectorDriver& DeviceRegistry::GetEffector(const std::string& id) const {
+    const auto found = effectors_.find(id);
+    if (found == effectors_.end()) throw std::runtime_error("unknown effector driver: " + id);
+    return found->second;
+}
+
+std::vector<std::string> DeviceRegistry::ListArms() const {
+    std::vector<std::string> result;
+    for (const auto& item : arms_) result.push_back(item.first);
+    return result;
+}
+
+std::vector<std::string> DeviceRegistry::ListEffectors() const {
+    std::vector<std::string> result;
+    for (const auto& item : effectors_) result.push_back(item.first);
+    return result;
+}
+
+void DeviceRegistry::ValidateComposition(
+        const DeviceDefinition& definition, const DeviceComposition& composition) const {
+    ValidateDevice(definition.arm);
+    ValidateEffector(definition.effector);
+    Check(composition.effector_driver.empty() == definition.effector.channels.empty(),
+            "effector driver/configuration mismatch");
+    GetArm(composition.arm_driver).validate(definition.arm, composition.arm_options);
+    if (composition.effector_driver.empty()) {
+        Check(composition.effector_options.empty(), "effector options without effector driver");
+        return;
+    }
+    Check(!definition.effector.resource_id.empty(), "independent effector requires resource_id");
+    GetEffector(composition.effector_driver)
+            .validate(definition.effector, composition.effector_options);
+    if (definition.arm.resource_id == definition.effector.resource_id) {
+        const auto found = shared_.find({composition.arm_driver, composition.effector_driver});
+        Check(found != shared_.end(), "drivers cannot share this connection");
+        found->second.validate(definition, composition.arm_options, composition.effector_options);
+    }
+}
+
+Devices DeviceRegistry::CreateComposition(
+        const DeviceDefinition& definition, const DeviceComposition& composition) const {
+    ValidateComposition(definition, composition);
+    Devices devices;
+    if (!composition.effector_driver.empty() &&
+            definition.arm.resource_id == definition.effector.resource_id) {
+        devices =
+                shared_.at({composition.arm_driver, composition.effector_driver})
+                        .create(definition, composition.arm_options, composition.effector_options);
+    } else {
+        devices.arm =
+                GetArm(composition.arm_driver).create(definition.arm, composition.arm_options);
+        if (!composition.effector_driver.empty()) {
+            const auto& effector_driver = GetEffector(composition.effector_driver);
+            devices.effector =
+                    effector_driver.create(definition.effector, composition.effector_options);
+        }
+    }
+    Check(devices.arm != nullptr &&
+                    static_cast<bool>(devices.effector) == !definition.effector.channels.empty(),
+            "driver device composition mismatch");
     return devices;
 }
 
@@ -116,14 +214,17 @@ struct DeviceSession::Impl {
 DeviceSession::DeviceSession(DeviceDefinition definition, Devices devices)
     : DeviceSession(std::move(definition), std::move(devices), DefaultLockDirectory()) {}
 
-DeviceSession::DeviceSession(DeviceDefinition definition, Devices devices,
-                             std::string lock_directory)
+DeviceSession::DeviceSession(
+        DeviceDefinition definition, Devices devices, std::string lock_directory)
     : impl_(std::make_unique<Impl>()) {
     ValidateEffector(definition.effector);
     Check(static_cast<bool>(devices.effector) == !definition.effector.channels.empty(),
-          "effector required");
+            "effector required");
     impl_->arm = std::make_unique<ArmSession>(definition.arm, std::move(devices.arm),
-                                              std::move(lock_directory));
+            std::move(lock_directory),
+            definition.effector.channels.empty() || definition.effector.resource_id.empty()
+                    ? std::vector<std::string>{}
+                    : std::vector<std::string>{definition.effector.resource_id});
     impl_->effector = std::move(devices.effector);
     impl_->definition = std::move(definition);
 }
@@ -135,7 +236,7 @@ DeviceSession::~DeviceSession() {
 void DeviceSession::Connect() {
     auto& p = *impl_;
     Check(!p.connected, "already connected");
-    p.arm->Connect();  // Acquire the whole assembly lease before any effector connection.
+    p.arm->Connect();  // Acquire every physical resource before either role connects.
     try {
         if (p.effector) p.effector->Connect();
         p.connected = true;
@@ -156,7 +257,7 @@ void DeviceSession::Disconnect() noexcept {
 
 void DeviceSession::Ready() const {
     Check(impl_->connected && !impl_->latched,
-          "device disconnected or fault latched; inspect before reconnect");
+            "device disconnected or fault latched; inspect before reconnect");
 }
 
 ArmState DeviceSession::ReadArm() {
@@ -173,7 +274,7 @@ EffectorState DeviceSession::ReadEffector() {
     const auto& config = p.definition.effector;
     const double age = std::chrono::duration<double>(Clock::now() - state.received_at).count();
     Check(state.valid && state.sample_id > 0 && age >= 0 && age <= config.maximum_age_s,
-          "invalid or stale effector feedback");
+            "invalid or stale effector feedback");
     if (config.feedback == EffectorFeedback::kNone) {
         // Liveness only: a fresh sample proves the device is on the bus, nothing about its
         // position.
@@ -182,19 +283,19 @@ EffectorState DeviceSession::ReadEffector() {
         return state;
     }
     Check(state.positions.size() == config.channels.size(),
-          "effector feedback channel count mismatch");
+            "effector feedback channel count mismatch");
     for (double value : state.positions) {
         Check(std::isfinite(value) && value >= 0 && value <= 1,
-              "invalid normalized effector feedback");
+                "invalid normalized effector feedback");
     }
     Check(state.loads.empty() || state.loads.size() == config.channels.size(),
-          "effector load channel count mismatch");
+            "effector load channel count mismatch");
     for (double value : state.loads) {
         Check(std::isfinite(value) && value >= -1 && value <= 1,
-              "invalid normalized effector load");
+                "invalid normalized effector load");
     }
     Check(!state.holding.has_value() || p.effector->GetCapabilities().grasp_detection,
-          "effector reported holding without grasp detection");
+            "effector reported holding without grasp detection");
     p.latched = p.latched || state.fault;
     return state;
 }
@@ -247,8 +348,8 @@ void DeviceSession::SetEffectorEnabled(bool enabled) {
     Ready();
     const auto capabilities = GetEffectorCapabilities();
     if (!(enabled ? capabilities.enable : capabilities.disable)) {
-        throw CommandRejected(enabled ? "effector enable unsupported"
-                                      : "effector disable unsupported");
+        throw CommandRejected(
+                enabled ? "effector enable unsupported" : "effector disable unsupported");
     }
     const auto arm = ReadArm();
     const auto tool = ReadEffector();
@@ -264,7 +365,7 @@ void DeviceSession::SetEffectorEnabled(bool enabled) {
         written = true;
         const auto state = ReadEffector();
         Check(state.enabled.has_value() && *state.enabled == enabled,
-              "effector torque state not confirmed");
+                "effector torque state not confirmed");
     } catch (const CommandRejected&) {
         if (!written) throw;
         impl_->latched = true;
@@ -302,7 +403,7 @@ CommandResult DeviceSession::HoldEffector() {
     auto& p = *impl_;
     Check(p.connected, "not connected");
     if (!GetEffectorCapabilities().verified_hold ||
-        p.definition.effector.feedback == EffectorFeedback::kNone) {
+            p.definition.effector.feedback == EffectorFeedback::kNone) {
         throw CommandRejected("verified effector hold unsupported");
     }
     // Without fresh feedback the hold is still attempted, but it cannot be confirmed.
@@ -320,9 +421,9 @@ CommandResult DeviceSession::HoldEffector() {
     } catch (...) {  // Refused or failed: no physical stop is established.
     }
     p.latched = p.latched || !confirmed;
-    return {++p.command_id, confirmed ? Result::kSucceeded : Result::kStopUnknown,
-            confirmed ? "effector_hold_confirmed"
-                      : "effector hold unconfirmed; inspect before reconnecting"};
+    const char* detail = "effector hold unconfirmed; inspect before reconnecting";
+    if (confirmed) detail = "effector_hold_confirmed";
+    return {++p.command_id, confirmed ? Result::kSucceeded : Result::kStopUnknown, detail};
 }
 
 bool DeviceSession::HasEffector() const {
@@ -337,8 +438,8 @@ const DeviceDefinition& DeviceSession::Definition() const {
     return impl_->definition;
 }
 
-CommandResult DeviceSession::MoveArm(const JointPoint& point,
-                                     const std::function<bool()>& cancelled) {
+CommandResult DeviceSession::MoveArm(
+        const JointPoint& point, const std::function<bool()>& cancelled) {
     return RunArm([&] { return impl_->arm->Submit(point); }, cancelled);
 }
 
@@ -363,7 +464,7 @@ CommandResult DeviceSession::FollowEffector(const EffectorPoint& point) {
     Check(!before.enabled.has_value() || *before.enabled, "effector disabled");
     const bool open_loop = p.definition.effector.feedback == EffectorFeedback::kNone;
     CommandResult result{++p.command_id, open_loop ? Result::kUnverified : Result::kSucceeded,
-                         "sent: target sent; arrival not awaited"};
+            "sent: target sent; arrival not awaited"};
     try {
         p.effector->Submit(point);
         return result;
@@ -385,7 +486,7 @@ CommandResult DeviceSession::FollowEffector(const EffectorPoint& point) {
 }
 
 CommandResult DeviceSession::JogArm(std::size_t joint_index, double delta_rad, double speed_scale,
-                                    const std::function<bool()>& cancelled) {
+        const std::function<bool()>& cancelled) {
     Ready();
     if (joint_index >= impl_->definition.arm.joints.size() || !std::isfinite(delta_rad)) {
         throw CommandRejected("invalid joint index or nonfinite step");
@@ -395,40 +496,39 @@ CommandResult DeviceSession::JogArm(std::size_t joint_index, double delta_rad, d
     return MoveArm({target, speed_scale}, cancelled);
 }
 
-CommandResult DeviceSession::MoveArmPath(const JointPath& path,
-                                         const std::function<bool()>& cancelled) {
+CommandResult DeviceSession::MoveArmPath(
+        const JointPath& path, const std::function<bool()>& cancelled) {
     return RunArm([&] { return impl_->arm->SubmitPath(path); }, cancelled);
 }
 
 CommandResult DeviceSession::MoveArmTrajectory(const JointTrajectory& trajectory,
-                                               const std::function<bool()>& cancelled,
-                                               const std::vector<TimedEffectorPoint>& effector) {
+        const std::function<bool()>& cancelled, const std::vector<TimedEffectorPoint>& effector) {
     return RunArm([&] { return impl_->arm->SubmitTrajectory(trajectory); }, cancelled, effector);
 }
 
 void DeviceSession::CheckEffectorPoint(const EffectorPoint& point) const {
     const auto& p = *impl_;
     Check(p.effector && point.positions.size() == p.definition.effector.channels.size(),
-          "invalid tool target");
+            "invalid tool target");
     Check(std::isfinite(point.duration_s) && point.duration_s > 0 &&
-                  point.duration_s <= p.effector->GetCapabilities().maximum_duration_s,
-          "effector duration unsupported");
+                    point.duration_s <= p.effector->GetCapabilities().maximum_duration_s,
+            "effector duration unsupported");
     for (double value : point.positions) {
         Check(std::isfinite(value) && value >= 0 && value <= 1, "effector target outside [0,1]");
     }
 }
 
 CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit,
-                                    const std::function<bool()>& cancelled,
-                                    const std::vector<TimedEffectorPoint>& effector) {
+        const std::function<bool()>& cancelled, const std::vector<TimedEffectorPoint>& effector) {
     Ready();
     auto& p = *impl_;
     Check(effector.size() <= 64, "at most 64 timed effector targets");
     for (std::size_t i = 0; i < effector.size(); ++i) {
         CheckEffectorPoint(effector[i].point);
         Check(std::isfinite(effector[i].at_s) &&
-                      effector[i].at_s >= (i ? effector[i - 1].at_s : 0) && effector[i].at_s <= 60,
-              "effector targets need ordered times within 60 s");
+                        effector[i].at_s >= (i ? effector[i - 1].at_s : 0) &&
+                        effector[i].at_s <= 60,
+                "effector targets need ordered times within 60 s");
     }
     if (cancelled && cancelled())
         return {++p.command_id, Result::kCancelled, "cancelled before submission"};
@@ -436,13 +536,13 @@ CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit
         const auto tool = ReadEffector();
         Check(!tool.fault && !tool.moving, "effector faulted or busy before arm motion");
         Check(effector.empty() || !tool.enabled.has_value() || *tool.enabled,
-              "effector disabled before scheduled targets");
+                "effector disabled before scheduled targets");
     }
     auto result = submit();
     const auto started = Clock::now();
     const auto after = [&](double seconds) {
         return started +
-               std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
+                std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(seconds));
     };
     std::size_t sent = 0;
     auto settled = started;  // When the last sent effector target has had its duration.
@@ -454,24 +554,24 @@ CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit
             const bool arm_ok =
                     result.status == Result::kRunning || result.status == Result::kSucceeded;
             if (arm_ok && !cancel && sent < effector.size() &&
-                Clock::now() >= after(effector[sent].at_s)) {
+                    Clock::now() >= after(effector[sent].at_s)) {
                 const auto tool = ReadEffector();
                 Check(!tool.fault && (!tool.enabled.has_value() || *tool.enabled),
-                      "effector fault or disabled during timed targets");
+                        "effector fault or disabled during timed targets");
                 // One per cycle: late targets are never burst.
                 p.effector->Submit(effector[sent].point);
                 settled = Clock::now() +
-                          std::chrono::duration_cast<Clock::duration>(
-                                  std::chrono::duration<double>(effector[sent].point.duration_s));
+                        std::chrono::duration_cast<Clock::duration>(
+                                std::chrono::duration<double>(effector[sent].point.duration_s));
                 ++sent;
             }
             if (!arm_ok) break;
             if (result.status == Result::kSucceeded &&
-                (sent == effector.size() && Clock::now() >= settled))
+                    (sent == effector.size() && Clock::now() >= settled))
                 break;
             if (cancel && result.status == Result::kSucceeded) {
                 result = {result.command_id, Result::kCancelled,
-                          "cancelled during timed effector targets"};
+                        "cancelled during timed effector targets"};
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -493,15 +593,15 @@ CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit
     } else if (sent) {
         result.status = Result::kUnverified;
         result.detail += "; " + std::to_string(sent) +
-                         " effector targets delivered on schedule, not measured";
+                " effector targets delivered on schedule, not measured";
     }
     p.latched = Failed(result.status);
     result.command_id = ++p.command_id;
     return result;
 }
 
-CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
-                                          const std::function<bool()>& cancelled) {
+CommandResult DeviceSession::MoveEffector(
+        const EffectorPoint& point, const std::function<bool()>& cancelled) {
     Ready();
     auto& p = *impl_;
     CheckEffectorPoint(point);
@@ -530,11 +630,12 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
         throw CommandRejected("effector duration_s exceeds the effector timeout_s");
     const auto submitted = Clock::now();
     // Open loop: wait the commanded execution time, then report the move as delivered, not reached.
-    const auto finished = submitted + std::chrono::duration_cast<Clock::duration>(
-                                              std::chrono::duration<double>(point.duration_s));
-    const auto deadline =
-            submitted + std::chrono::duration_cast<Clock::duration>(
-                                std::chrono::duration<double>(p.definition.effector.timeout_s));
+    const auto finished = submitted +
+            std::chrono::duration_cast<Clock::duration>(
+                    std::chrono::duration<double>(point.duration_s));
+    const auto deadline = submitted +
+            std::chrono::duration_cast<Clock::duration>(
+                    std::chrono::duration<double>(p.definition.effector.timeout_s));
     CommandResult result{++p.command_id, Result::kRunning, "awaiting fresh effector feedback"};
     std::uint64_t last = before.sample_id;
     unsigned settled = 0;
@@ -561,10 +662,10 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
             const bool moved = distance(current_arm.joints_rad) > allowed;
             if (current_arm.fault || !current_arm.enabled || !current_arm.position_mode || moved) {
                 throw std::runtime_error(std::string("arm state changed during effector motion:") +
-                                         (current_arm.fault ? " fault" : "") +
-                                         (!current_arm.enabled ? " disabled" : "") +
-                                         (!current_arm.position_mode ? " not_position_mode" : "") +
-                                         (moved ? " moved" : ""));
+                        (current_arm.fault ? " fault" : "") +
+                        (!current_arm.enabled ? " disabled" : "") +
+                        (!current_arm.position_mode ? " not_position_mode" : "") +
+                        (moved ? " moved" : ""));
             }
             const auto state = ReadEffector();
             Check(!state.fault && state.sample_id >= last, "effector fault/sequence regression");
@@ -572,8 +673,9 @@ CommandResult DeviceSession::MoveEffector(const EffectorPoint& point,
                 last = state.sample_id;
                 bool reached = !state.moving;
                 for (std::size_t i = 0; i < point.positions.size(); ++i) {
-                    reached = reached && std::abs(state.positions[i] - point.positions[i]) <=
-                                                 p.definition.effector.tolerance;
+                    reached = reached &&
+                            std::abs(state.positions[i] - point.positions[i]) <=
+                                    p.definition.effector.tolerance;
                 }
                 settled = reached ? settled + 1 : 0;
                 gripping = !state.moving && state.holding.value_or(false) ? gripping + 1 : 0;

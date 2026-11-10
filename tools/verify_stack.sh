@@ -44,12 +44,22 @@ cmake -S components/control/manipulation -B "${STACK_BUILD}/default" -DCMAKE_BUI
 cmake --build "${STACK_BUILD}/default" -j2
 ctest --test-dir "${STACK_BUILD}/default" --output-on-failure
 BENCH_DRIVER="${SDK_ROOT}/components/control/manipulation/examples/bench_driver"
+CAPABILITY_MODULE="${SDK_ROOT}/components/control/manipulation/examples/capability_probe"
 cmake -S components/control/manipulation -B "${STACK_BUILD}/extension" -DBUILD_TESTING=OFF \
-    -DCMAKE_BUILD_TYPE=Release -DMANIPULATION_EXTRA_DRIVER_DIRS="${BENCH_DRIVER}"
+    -DCMAKE_BUILD_TYPE=Release -DMANIPULATION_EXTRA_DRIVER_DIRS="${BENCH_DRIVER}" \
+    -DMANIPULATION_EXTRA_CAPABILITY_DIRS="${CAPABILITY_MODULE}"
 cmake --build "${STACK_BUILD}/extension" -j2
 "${STACK_BUILD}/extension/manipulation-device" run \
     components/control/manipulation/examples/bench_driver/bench.yaml
+"${STACK_BUILD}/extension/manipulation-device" run \
+    components/control/manipulation/examples/bench_driver/composed.yaml
+"${STACK_BUILD}/extension/manipulation-device" run \
+    components/control/manipulation/examples/capability_probe/device.yaml
 "${STACK_BUILD}/install/bin/manipulation-device" run \
     components/control/manipulation/examples/point_sequence/point_sequence.yaml
+"${STACK_BUILD}/install/bin/manipulation-device" run \
+    components/control/manipulation/examples/composed_mock.yaml
+"${STACK_BUILD}/install/bin/manipulation-device" run \
+    components/control/manipulation/examples/capability_sequence.yaml
 python3 components/control/manipulation/tests/check_relocation.py "${STACK_BUILD}/install"
 python3 components/control/manipulation/tests/check_commands.py "${STACK_BUILD}/install"

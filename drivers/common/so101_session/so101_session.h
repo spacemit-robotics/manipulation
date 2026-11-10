@@ -1,8 +1,8 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // SO101 composition and calibrated register access; private to the registered driver.
-#ifndef MANIPULATION_DRIVERS_COMMON_SO101_SESSION_SO101_SESSION_H_
-#define MANIPULATION_DRIVERS_COMMON_SO101_SESSION_SO101_SESSION_H_
+#ifndef SO101_SESSION_H
+#define SO101_SESSION_H
 
 #include <array>
 #include <memory>
@@ -33,6 +33,7 @@ struct Calibration {
 
 struct Settings {
     std::string port;
+    bool arm_present = true;
     std::array<uint8_t, kArmJoints> ids{{1, 2, 3, 4, 5}};
     uint8_t gripper_id = 6;
     double maximum_velocity = 1.0;
@@ -74,7 +75,7 @@ public:
     void Disconnect() noexcept;
     Sample Read(uint8_t id);
     void Target(const std::vector<uint8_t>& ids, const std::vector<int>& ticks,
-                const std::vector<double>& velocities);
+            const std::vector<double>& velocities);
     void Torque(const std::vector<uint8_t>& ids, bool enabled);
     const Settings& Config() const;
 
@@ -87,9 +88,9 @@ private:
     std::mutex mutex_;
 };
 
-std::unique_ptr<Arm> MakeArm(const DeviceConfig& definition,
-                             std::shared_ptr<SharedSession> session);
-std::unique_ptr<EndEffector> MakeGripper(const EffectorConfig& definition,
-                                         std::shared_ptr<SharedSession> session);
+std::unique_ptr<Arm> MakeArm(
+        const DeviceConfig& definition, std::shared_ptr<SharedSession> session);
+std::unique_ptr<EndEffector> MakeGripper(
+        const EffectorConfig& definition, std::shared_ptr<SharedSession> session);
 }  // namespace spacemit::manipulation::so101
-#endif  // MANIPULATION_DRIVERS_COMMON_SO101_SESSION_SO101_SESSION_H_
+#endif  // SO101_SESSION_H

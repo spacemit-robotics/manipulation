@@ -39,7 +39,7 @@
 | --- | --- |
 | 机械臂 Arm | 产生关节运动的设备，不隐含存在末端 |
 | 末端执行器 EndEffector | 夹爪或灵巧手；按通道控制，通道不一定对应 URDF 关节 |
-| 设备组合 | 一个机械臂加可选末端，共享一个 `resource_id` 和一个写入者 |
+| 设备组合 | 一个机械臂加可选末端；独立连接分别占有资源，共用连接显式注册共享工厂 |
 | 能力 | 基于公共接口的可复用实现，如点位任务、标定求解 |
 | 工具 | 调用能力的命令行或界面入口，不包含能力逻辑本身 |
 | 位置到位 | 新鲜反馈在误差内到达目标；不等于实物抓稳 |
@@ -77,13 +77,15 @@
 - 写入之后的任何失败抛出其他异常，会话尝试保持并锁定；无法确认停止时结果为 `stop_unknown`。
 - 不支持的约束（如无法保证的速度）应拒绝，不要换算成别的单位。
 
-驱动需要的路径通过 `DeviceDriver::resolve_options` 声明，可复用 `ResolveResourceOptions`，
+驱动需要的路径通过注册描述的 `resolve_options` 声明，可复用 `ResolveResourceOptions`，
 以配置文件所在目录为基准解析。
 
 ### 共享连接
 
-臂和手共用一个控制器连接时，由同一个组合驱动创建两者并共享连接对象，参考
+不同 `resource_id` 的臂和手分别调用各自工厂。相同标识必须注册 `SharedDeviceDriver`，
+由其工厂创建两者并共享连接对象；未登记的同资源组合会在连接前拒绝。参考
 `drivers/common/agx_session/` 或 `drivers/common/so101_session/`。
+会话先按名称排序、去重并锁定所有资源，再连接任何设备；任一锁或连接失败时释放全部资源。
 SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件的公开接口：
 
 - `motor_alloc_uart` 打开串口，`motor_get_paras` / `motor_set_paras` 读写寄存器；
@@ -104,13 +106,20 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
    ```cpp
    namespace spacemit::manipulation {
    void RegisterMyDevice(DeviceRegistry* registry) {
-       registry->Register({"my_driver", 1, Validate, Create});
+       registry->RegisterArm({"my_arm", 1, ValidateArm, CreateArm});
+       registry->RegisterEffector({"my_tool", 1, ValidateTool, CreateTool});
+       registry->RegisterShared({"my_arm", "my_tool", ValidateShared, CreateShared});
    }
    }  // namespace spacemit::manipulation
    ```
 
    注册函数必须在 `spacemit::manipulation` 命名空间内且具有外部链接。
-   `Validate` 只检查配置（关节顺序、通道、选项），不连接设备；`Create` 只构造对象。
+   只登记模块实现的角色；末端和共享工厂不是必填项。
+   `ValidateArm` 接收 `DeviceConfig`，`ValidateTool` 接收 `EffectorConfig`；二者另接收各自 `DriverOptions`。
+   `CreateArm` / `CreateTool` 返回对应接口的 `unique_ptr`。
+   共享回调接收 `DeviceDefinition` 和两份选项，工厂返回 `Devices`，须校验连接参数一致。
+   校验只检查配置，工厂只构造对象，均不访问硬件。
+   `Register(DeviceDriver)` 继续用于兼容整机 `device.driver` 配置。
 
 2. 在模块的 `CMakeLists.txt` 中登记：
 
@@ -130,6 +139,7 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
    参考 `tests/arm_test.cpp` 与 `tests/test_nero.py`。真机测试前先在 Mock 和替身上通过。
 
 `examples/bench_driver/` 是可直接构建的单轴示例。
+其中 `composed.yaml` 把扩展机械臂与内置 Mock 末端组合，`bench.yaml` 使用整机配置。
 
 ## 5. 新增能力与工具
 
@@ -139,6 +149,56 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 - 从 `device.yaml`、`describe` 和 `descriptions/` 取得关节、通道和模型，不写死型号。
 - 运动命令直接执行，不需要额外参数；不自动使能、清错、归位或重试。只读工具用 `DeviceClient(..., allow_motion=False)`。
 - 结果写入新文件，不覆盖已有文件。
+
+### 注册顺序能力
+
+`CapabilityRegistry` 将能力名映射到 `CapabilityDescriptor`：
+
+| 字段 | 职责 |
+| --- | --- |
+| `id` / `description` | 配置名称与用途 |
+| `parse` | 解码步骤，拒绝未知参数；自定义数据放入 `DeviceStep::parameters` |
+| `unsupported_reason` | 根据实际驱动能力判断支持条件；支持时返回空字符串 |
+| `validate` | 离线检查参数、关节数、通道数、限位与单位 |
+| `execute` | 经 `DeviceSession` 执行，传递取消请求并保留原始结果语义 |
+
+`parse`、`unsupported_reason`、`validate` 不访问硬件。执行前检查整个序列；实时状态条件仍由会话在下发前检查。
+能力不能自动使能、清错或把 `unverified` 改为成功。注册表在开始解析任务前装配，不支持并发修改。
+
+模块用以下方式登记，不修改公共解析器和执行器：
+
+```cmake
+target_sources(manipulation_motion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/my_capability.cpp)
+manipulation_register_capability(RegisterMyCapability)
+```
+
+注册函数位于 `spacemit::manipulation` 命名空间，接收 `CapabilityRegistry*`。
+构建时用 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定模块目录。在 SDK 根目录执行以下命令运行随附示例：
+
+```bash
+cd components/control/manipulation
+cmake -S . -B build-capability -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF \
+    -DMANIPULATION_EXTRA_CAPABILITY_DIRS="$PWD/examples/capability_probe"
+cmake --build build-capability -j2
+build-capability/manipulation-device run examples/capability_probe/device.yaml
+```
+
+该示例注册 `assert_joint_position`，只读取 Mock 反馈。
+
+### 复用手眼标定
+
+公共模块提供采样、会话记录、求解、评估和格式导出；应用保留自动运动路线、桌面登记和业务批准流程。
+Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样路线仍由应用管理。
+`perceptive_grasp` 可使用公共 CLI 采集并导出其 `T_base_camera` 配置，原有执行器不变。
+
+| 模块 | 接口 |
+| --- | --- |
+| `sampling` | `capture_sample`：静止检查、多帧采集与一致性筛选 |
+| `calibration_session` | `load_config`、`CalibrationSession`、`read_dataset`、`solve_session`、`export_perceptive` |
+| `hand_eye` | `solve`、`evaluate_residuals`：眼在手外求解与残差评估，不访问设备 |
+
+配置指定设备计划、关节模型、相机采样模块和安装标识。记录包含设备与模型摘要、关节顺序、相机序列号、内参、标定板几何及坐标系。
+同一会话不能混用身份或未完成的样本；跨应用导出要求明确安装标识和通过质量阈值的结果。
 
 手眼标定的相机采样是可替换模块（`--sampler`），提供 `create_sampler(options)`，返回的对象实现：
 

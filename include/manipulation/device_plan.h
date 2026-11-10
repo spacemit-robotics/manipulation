@@ -2,23 +2,30 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * @file device_plan.h
- * @brief Device configuration files (device.yaml) and their ordered point steps.
+ * @brief Device configuration files and ordered, registered capability steps.
  */
-#ifndef MANIPULATION_DEVICE_PLAN_H_
-#define MANIPULATION_DEVICE_PLAN_H_
+#ifndef DEVICE_PLAN_H
+#define DEVICE_PLAN_H
+#include <any>
 #include <string>
 #include <vector>
 #include "manipulation/device.h"
+#include "manipulation/device_composition.h"
 
 namespace spacemit::manipulation {
-/// One entry of `steps`: an arm point or an end-effector move.
+class CapabilityRegistry;
+struct CapabilityContext;
+
+/// One entry of `steps`, decoded and validated by its registered capability.
 struct DeviceStep {
-    /// "joint_point" or "effector_position".
+    /// Registered capability identifier.
     std::string capability;
     /// Arm target, used when capability is "joint_point".
     JointPoint arm;
     /// End-effector target, used when capability is "effector_position".
     EffectorPoint effector;
+    /// Capability-specific value type; arm/effector remain compatible with existing callers.
+    std::any parameters{};
 };
 
 /// A parsed device configuration.
@@ -33,6 +40,8 @@ struct DevicePlan {
     DriverOptions options;
     /// Ordered steps; empty when the configuration declares none.
     std::vector<DeviceStep> steps;
+    /// Independently selected drivers; empty when the legacy device.driver form is used.
+    DeviceComposition composition{};
 };
 
 /**
@@ -46,6 +55,16 @@ struct DevicePlan {
  */
 DevicePlan LoadDevicePlan(const std::string& filename, const DeviceRegistry& registry);
 
+/// Load with application-provided capability registrations; no device is connected.
+DevicePlan LoadDevicePlan(const std::string& filename, const DeviceRegistry& registry,
+        const CapabilityRegistry& capabilities);
+
+/// Construct legacy or independently selected drivers without connecting to hardware.
+Devices CreatePlanDevices(const DevicePlan& plan, const DeviceRegistry& registry);
+
+/// Describe the configured drivers' capabilities offline; never acquires device leases.
+CapabilityContext DescribePlanCapabilities(const DevicePlan& plan, const DeviceRegistry& registry);
+
 /**
  * @brief Execute steps in order on a connected session.
  *
@@ -58,6 +77,10 @@ DevicePlan LoadDevicePlan(const std::string& filename, const DeviceRegistry& reg
  *         unverified; kIdle for an empty list.
  */
 CommandResult RunDeviceSteps(DeviceSession& session, const std::vector<DeviceStep>& steps,
-                             const std::function<bool()>& cancelled = {});
+        const std::function<bool()>& cancelled = {});
+
+/// Execute with application-provided capabilities; validates all steps before the first write.
+CommandResult RunDeviceSteps(DeviceSession& session, const std::vector<DeviceStep>& steps,
+        const CapabilityRegistry& capabilities, const std::function<bool()>& cancelled);
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_DEVICE_PLAN_H_
+#endif  // DEVICE_PLAN_H
