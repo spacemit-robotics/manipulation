@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cmath>
 #include <exception>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -45,9 +46,12 @@ void ValidateName(const std::string& name) {
     }
 }
 
-void CheckGraphics() {
-    if (glGetError() != GL_NO_ERROR) {
-        throw std::runtime_error("MuJoCo OpenGL operation failed");
+void CheckGraphics(const char* operation) {
+    const GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        std::ostringstream message;
+        message << "MuJoCo OpenGL error 0x" << std::hex << error << " during " << operation;
+        throw std::runtime_error(message.str());
     }
 }
 
@@ -111,7 +115,7 @@ public:
             mjr_makeContext(&context_model, &context, mjFONTSCALE_100);
             mjv_defaultFreeCamera(native->Model(), &camera);
             context.readDepthMap = mjDEPTH_ZERONEAR;
-            CheckGraphics();
+            CheckGraphics("render context initialization");
             graphics_model = native->Model();
         }
         mj_copyData(data.get(), native->Model(), native->Data());
@@ -187,7 +191,7 @@ public:
         std::vector<float> bottom_depth(pixels);
         mjr_render(viewport, &graphics.scene, &graphics.context);
         mjr_readPixels(bottom_rgb.data(), bottom_depth.data(), viewport, &graphics.context);
-        CheckGraphics();
+        CheckGraphics("RGB-D rendering and readback");
         RgbdFrame frame;
         frame.width = spec.width;
         frame.height = spec.height;
@@ -267,7 +271,7 @@ void Viewer::Draw(const WorldSnapshot& snapshot) {
     mjr_setBuffer(mjFB_WINDOW, &graphics.context);
     const mjrRect viewport{0, 0, width, height};
     mjr_render(viewport, &graphics.scene, &graphics.context);
-    CheckGraphics();
+    CheckGraphics("viewer rendering");
     graphics.window->Swap();
 }
 

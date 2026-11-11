@@ -121,7 +121,9 @@ CMake 使用 MuJoCo 3.4.0，并按架构选择预编译包来源：
 
 离线构建时设 `SROBOTIS_THIRDPARTY_FETCH_OFF=ON` 禁用下载，并用 `MUJOCO_DIR` 指向已有依赖。
 
-K3 渲染依赖的 gl4es 由本目录 `cmake/FindGL4ES.cmake` 获取固定版本、应用补丁并构建。已有依赖可通过 `-DGL4ES_ROOT=...` 指定。
+K3 渲染依赖的 gl4es 由本目录 `cmake/FindGL4ES.cmake` 获取固定版本、应用补丁并构建。源码与补丁指纹决定独立缓存目录 `manipulation-gl4es-*`；环境变量 `SROBOTIS_THIRDPARTY_CACHE` 可指定缓存根目录。
+
+`-DGL4ES_ROOT=...` 可复用这一构建流程生成的依赖。复制依赖时，一并保留 `include/`、`lib/` 和 `.manipulation-gl4es-build`；构建系统核对补丁指纹和库文件摘要。旧依赖升级时，取消环境变量 `GL4ES_ROOT`，并通过 `cmake -U GL4ES_ROOT -S <源码目录> -B <构建目录>` 清除旧路径，按原构建选项重新配置。
 
 源码许可见 [LICENSE](LICENSE)，依赖说明见 [NOTICE](NOTICE)。随包分发的 MuJoCo 第三方声明位于 `licenses/mujoco-3.4.0/THIRD_PARTY_NOTICES`；启用 gl4es 时同时安装其许可文件。场景模型与网格的许可随各自资源目录保存。
 

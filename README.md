@@ -131,7 +131,7 @@ mm -DMANIPULATION_ENABLE_MUJOCO=ON -DMANIPULATION_ENABLE_SIMULATION_RENDERER=ON
 manipulation-simulation --plan examples/simulation/ur5e_robotiq.yaml --viewer
 ```
 
-服务保持一个物理世界，窗口与相机只读取它，不执行配置中的 `steps`。
+服务保持一个物理世界，窗口与相机只读取它，不执行配置中的 `steps`。启用 `--viewer` 时，首帧绘制成功后输出 `ready` 并接受连接。
 
 在第二个已加载 SDK 环境的终端、同一组件目录执行：
 
@@ -142,7 +142,7 @@ manipulation-simulation-camera --camera overview --output camera_frame
 
 `camera_frame/` 保存彩色图 `rgb.ppm`、米制深度 `depth.f32` 和相机参数 `metadata.json`；已有目录不覆盖。
 
-窗口和模拟相机需要 X11 桌面，隐藏相机窗口也需要显示服务。省略 `--viewer` 可只提供控制服务。
+窗口和模拟相机需要可用的 X11 显示服务；可在图形桌面终端运行，也可通过 `ssh -X` 将窗口转发到运行 X server 的电脑。省略 `--viewer` 可只提供控制服务。
 
 服务仅监听 `127.0.0.1:9100`。K3 连接 PC 时，在 K3 保持 SSH 转发运行，再使用同一远程配置：
 

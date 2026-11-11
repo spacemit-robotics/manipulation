@@ -21,6 +21,46 @@ def run(arguments, environment):
     return subprocess.run(arguments, env=environment, check=True, capture_output=True, text=True, timeout=20).stdout
 
 
+def check_startup(local, scene, environment):
+    original = scene.read_text()
+    scene.write_text(original.replace(
+        "<worldbody>", '<visual><global offwidth="4097"/></visual><worldbody>', 1
+    ))
+    command = [os.environ["MANIPULATION_SIMULATION"], "--plan", str(local), "--port", "0"]
+    try:
+        failed = subprocess.run(
+            [*command, "--viewer"], cwd=local.parent, env=environment,
+            capture_output=True, text=True, timeout=15,
+        )
+        assert failed.returncode != 0
+        assert "image dimensions exceed supported limits" in failed.stdout + failed.stderr
+        assert not any(
+            line.startswith("{") and json.loads(line).get("event") == "ready"
+            for line in failed.stdout.splitlines()
+        ), "viewer reported ready before its first frame succeeded"
+
+        # The same physical world remains usable without rendering.
+        headless = subprocess.Popen(
+            command, cwd=local.parent, env=environment,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            ready, _, _ = select.select([headless.stdout], [], [], 15)
+            assert ready, "headless service did not become ready"
+            assert json.loads(headless.stdout.readline())["event"] == "ready"
+        finally:
+            headless.terminate()
+            try:
+                _, error = headless.communicate(timeout=8)
+            except subprocess.TimeoutExpired:
+                headless.kill()
+                headless.communicate(timeout=3)
+                raise AssertionError("headless service did not stop") from None
+        assert headless.returncode == 0, error
+    finally:
+        scene.write_text(original)
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="simulation-render-") as directory:
         directory = Path(directory)
@@ -56,6 +96,7 @@ def main():
         local = directory / "local.json"
         local.write_text(json.dumps(plan))
         environment = dict(os.environ, MANIPULATION_LOCK_DIRECTORY=str(directory / "locks"))
+        check_startup(local, directory / "scene.xml", environment)
         server = subprocess.Popen(
             [os.environ["MANIPULATION_SIMULATION"], "--plan", str(local), "--port", "0", "--viewer"],
             env=environment,

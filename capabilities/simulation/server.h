@@ -32,6 +32,8 @@ struct SimulationServerOptions {
     double lease_timeout_s = 1;
     std::function<bool()> cancelled;
     std::function<void(unsigned, const std::string&)> ready;
+    // Runs once after connecting the runtime, before listening or reporting readiness.
+    std::function<void(MujocoRuntime&)> initialize;
     // False requests an orderly stop; no live engine pointers escape the runtime.
     std::function<bool(MujocoRuntime&)> tick;
     std::function<SimulationCaptureReply(MujocoRuntime&, const SimulationCaptureRequest&)> capture;

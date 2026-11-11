@@ -1,0 +1,36 @@
+diff --git a/src/gl/wrap/gles.c b/src/gl/wrap/gles.c
+--- a/src/gl/wrap/gles.c
++++ b/src/gl/wrap/gles.c
+@@ -15,4 +15,8 @@ void gles_glTexParameteri(glTexParameteri_ARG_EXPAND)
+ // emulation of 'glGetBooleanv' (for internal use only)
+ void gles_glGetBooleanv(glGetBooleanv_ARG_EXPAND)
+ {
++    if (pname == GL_STEREO || pname == GL_DOUBLEBUFFER) {
++        if (params) *params = pname == GL_DOUBLEBUFFER ? GL_TRUE : GL_FALSE;
++        return;
++    }
+     LOAD_GLES(glGetBooleanv); if (gles_glGetBooleanv) return gles_glGetBooleanv(pname, params);
+diff --git a/src/gl/getter.c b/src/gl/getter.c
+--- a/src/gl/getter.c
++++ b/src/gl/getter.c
+@@ -286,6 +286,9 @@ int gl4es_commonGet(GLenum pname, GLfloat *params) {
+         case GL_DOUBLEBUFFER:
+             *params = 1;    // Fake double buffering...
+             break;
++        case GL_STEREO:
++            *params = 0;
++            break;
+         case GL_MAX_ELEMENTS_INDICES:
+             *params = 1024;
+             break;
+diff --git a/src/gl/const.h b/src/gl/const.h
+--- a/src/gl/const.h
++++ b/src/gl/const.h
+@@ -8,4 +8,7 @@
+ #define GL_MAJOR_VERSION            0x821B
+ #define GL_MINOR_VERSION            0x821C
+ #define GL_DOUBLEBUFFER				0x0C32
++#ifndef GL_STEREO
++#define GL_STEREO 0x0C33
++#endif
+ /* texture mapping */

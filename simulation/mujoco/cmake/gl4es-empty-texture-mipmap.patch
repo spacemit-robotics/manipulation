@@ -1,0 +1,12 @@
+diff --git a/src/gl/texture_params.c b/src/gl/texture_params.c
+--- a/src/gl/texture_params.c
++++ b/src/gl/texture_params.c
+@@ -929,7 +929,7 @@ void realize_textures(int drawing) {
+                 tex->mipmap_need = 0;
+             else
+                 tex->mipmap_need = (is_mipmap_needed(&tex->sampler) && (hardext.esversion!=1) && !tex->npot)?1:0;
+-            if(tex->mipmap_need && !tex->mipmap_done) {
++            if(tex->mipmap_need && !tex->mipmap_done && tex->width>0 && tex->height>0) {
+                 if(!tex->mipmap_auto) {
+                     // should check if glGenerateMipmap exist, and fall back to no mipmap if not
+                     LOAD_GLES2_OR_OES(glGenerateMipmap);

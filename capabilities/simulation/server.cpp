@@ -106,6 +106,7 @@ public:
         runtime_.Start();
         devices_.arm->Connect();
         if (devices_.effector) devices_.effector->Connect();
+        if (options_.initialize) options_.initialize(runtime_);
         listener_ = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
         Require(listener_ >= 0, "simulation listener creation failed");
 

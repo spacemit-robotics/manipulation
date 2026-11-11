@@ -47,7 +47,13 @@ void ConfigureSimulationRenderer(
         bool viewer, const std::string& default_camera, SimulationServerOptions* options) {
     if (!options) throw std::invalid_argument("missing simulation server options");
     auto graphics = std::make_shared<Graphics>();
-    if (viewer) graphics->viewer = std::make_unique<mujoco_sim::Viewer>();
+    if (viewer) {
+        graphics->viewer = std::make_unique<mujoco_sim::Viewer>();
+        options->initialize = [graphics](MujocoRuntime& runtime) {
+            graphics->viewer->Draw(runtime.Snapshot());
+            graphics->next_draw = Clock::now() + std::chrono::milliseconds(33);
+        };
+    }
     // A camera context is created only when the first observer requests an image.
     options->tick = [graphics](MujocoRuntime& runtime) {
         if (!graphics->viewer) return true;
