@@ -66,11 +66,22 @@ class SimulationDriverTests(unittest.TestCase):
     def test_registered_roles_identify_models_and_generic_mappings(self):
         result = subprocess.run([CLI, "driver-roles"], capture_output=True, text=True, check=True, timeout=10)
         roles = set(result.stdout.splitlines())
-        self.assertTrue({"arm mujoco_ur5e", "arm mujoco_mapped_arm", "arm mujoco"} <= roles)
-        self.assertTrue({"effector mujoco_robotiq_2f85", "effector mujoco_mapped_effector",
-                         "effector mujoco"} <= roles)
+        self.assertTrue({"arm mujoco_ur5e", "arm mujoco_mapped_arm"} <= roles)
+        self.assertTrue({"effector mujoco_robotiq_2f85", "effector mujoco_mapped_effector"} <= roles)
+        self.assertNotIn("arm mujoco", roles)
+        self.assertNotIn("effector mujoco", roles)
         self.assertNotIn("arm mujoco_robotiq_2f85", roles)
         self.assertNotIn("effector mujoco_ur5e", roles)
+
+    def test_unnamed_mujoco_roles_are_rejected_before_loading_scene(self):
+        original = copy.deepcopy(self.plan)
+        for role in ("arm", "effector"):
+            with self.subTest(role=role):
+                self.plan = copy.deepcopy(original)
+                self.plan["device"][role]["driver"] = "mujoco"
+                result = self.validate()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"unknown {role} driver: mujoco", result.stderr)
 
     def test_shipped_model_plans_respect_built_transport_support(self):
         for name in ("ur5e_arm.yaml", "ur5e_robotiq.yaml", "ur5e_robotiq_remote.yaml"):
@@ -85,15 +96,15 @@ class SimulationDriverTests(unittest.TestCase):
                     self.assertNotEqual(result.returncode, 0)
                     self.assertIn("local MuJoCo support not built", result.stderr)
 
-    def test_model_roles_accept_shared_prefix_and_all_compatible_combinations(self):
+    def test_model_roles_accept_shared_prefix_and_all_supported_combinations(self):
         for item in self.mapping["arm"] + self.mapping["effector"]:
             item["joint"] = "robot_" + item["joint"]
             item["actuator"] = "robot_" + item["actuator"]
         for item in self.plan["device"]["arm"]["joints"]:
             item["name"] = "robot_" + item["name"]
         for arm, effector in itertools.product(
-            ("mujoco_ur5e", "mujoco_mapped_arm", "mujoco"),
-            ("mujoco_robotiq_2f85", "mujoco_mapped_effector", "mujoco"),
+            ("mujoco_ur5e", "mujoco_mapped_arm"),
+            ("mujoco_robotiq_2f85", "mujoco_mapped_effector"),
         ):
             with self.subTest(arm=arm, effector=effector):
                 self.plan["device"]["arm"]["driver"] = arm

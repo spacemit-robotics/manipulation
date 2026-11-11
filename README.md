@@ -68,10 +68,12 @@ manipulation demo
 
 `device.arm.driver` 与 `device.effector.driver` 分别选择机械臂和末端；各自的 `options` 保存连接参数。
 
-| 角色 | 随附设备驱动 |
-| --- | --- |
-| 机械臂 | `mock`、`nero`、`so101`、`mujoco_ur5e`（按需构建） |
-| 末端执行器 | `mock`、`revo2`、`so101_gripper`、`mujoco_robotiq_2f85`（按需构建） |
+| 角色 | 硬件与 Mock | MuJoCo（按需构建） |
+| --- | --- | --- |
+| `device.arm.driver` | `mock`、`nero`、`so101` | `mujoco_ur5e`、`mujoco_mapped_arm` |
+| `device.effector.driver` | `mock`、`revo2`、`so101_gripper` | `mujoco_robotiq_2f85`、`mujoco_mapped_effector` |
+
+型号驱动用于随附的 UR5e 与 Robotiq 2F-85；`mujoco_mapped_arm` 与 `mujoco_mapped_effector` 通过映射文件接入自定义模型。
 
 不同连接分别填写 `resource_id`；共用连接时使用相同标识，且该驱动对须注册共享连接工厂。
 Nero / Revo2、SO101 / 原配夹爪和 MuJoCo 仿真角色已提供共享连接。

@@ -185,18 +185,15 @@ int main(int argc, char** argv) {
             TestCachedSamples(plan, registry);
             TestConcurrentRoleLifecycle(plan, registry);
             Check(m::IsMujocoArmDriver("mujoco_ur5e") &&
+                            m::IsMujocoArmDriver("mujoco_mapped_arm") &&
+                            !m::IsMujocoArmDriver("mujoco") &&
                             !m::IsMujocoArmDriver("mujoco_robotiq_2f85") &&
                             m::IsMujocoEffectorDriver("mujoco_robotiq_2f85") &&
+                            m::IsMujocoEffectorDriver("mujoco_mapped_effector") &&
+                            !m::IsMujocoEffectorDriver("mujoco") &&
                             !m::IsMujocoEffectorDriver("mujoco_ur5e"),
-                    "MuJoCo role classification mixed models");
-            for (const auto* arm_name : {"mujoco_mapped_arm", "mujoco"}) {
-                for (const auto* effector_name : {"mujoco_mapped_effector", "mujoco"}) {
-                    auto compatible = plan;
-                    compatible.composition.arm_driver = arm_name;
-                    compatible.composition.effector_driver = effector_name;
-                    TestShared(compatible, registry, directory);
-                }
-            }
+                    "MuJoCo role classification accepted an unknown or mismatched driver");
+            TestShared(plan, registry, directory);
             TestCancellationAndTimeout(plan, registry, directory);
         } catch (...) {
             std::filesystem::remove_all(temporary);

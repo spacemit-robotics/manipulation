@@ -318,10 +318,10 @@ void ValidateRobotiqMapping(const Mapping& mapping) {
 
 namespace spacemit::manipulation {
 namespace {
-constexpr std::array<const char*, 3> kMujocoArmDrivers{
-        "mujoco_ur5e", "mujoco_mapped_arm", "mujoco"};
-constexpr std::array<const char*, 3> kMujocoEffectorDrivers{
-        "mujoco_robotiq_2f85", "mujoco_mapped_effector", "mujoco"};
+constexpr std::array<const char*, 2> kMujocoArmDrivers{
+        "mujoco_ur5e", "mujoco_mapped_arm"};
+constexpr std::array<const char*, 2> kMujocoEffectorDrivers{
+        "mujoco_robotiq_2f85", "mujoco_mapped_effector"};
 }  // namespace
 
 bool IsMujocoArmDriver(const std::string& name) {
