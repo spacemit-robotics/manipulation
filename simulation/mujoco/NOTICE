@@ -1,0 +1,20 @@
+SpacemiT manipulation MuJoCo physics component
+Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+Licensed under the Apache License, Version 2.0; see LICENSE.
+
+This component links to MuJoCo. The default dependency is MuJoCo 3.4.0.
+Project: https://github.com/google-deepmind/mujoco
+License: Apache-2.0
+Upstream license: https://github.com/google-deepmind/mujoco/blob/3.4.0/LICENSE
+
+Distributions bundling libmujoco also include THIRD_PARTY_NOTICES. The dependency
+package's own notices take precedence. For a 3.4.0 package without this file,
+licenses/mujoco-3.4.0/THIRD_PARTY_NOTICES preserves the unmodified notices from:
+https://github.com/google-deepmind/mujoco/releases/download/3.4.0/mujoco-3.4.0-linux-x86_64.tar.gz
+SHA-256 of the notice file:
+c9330bce649bafb5426b54d933c083025153d61c89fe2ccfe273a845403d15b0
+
+These are the upstream release's third-party notices, not a claim that a custom
+binary uses the same compiler or optional dependencies. Distributors of custom
+builds must retain any additional notices for their build. Robot models and
+application assets retain their own licenses.

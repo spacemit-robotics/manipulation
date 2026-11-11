@@ -1,0 +1,6 @@
+<mujoco model="globally_disabled_actuation">
+  <include file="world.xml"/>
+  <option>
+    <flag actuation="disable"/>
+  </option>
+</mujoco>

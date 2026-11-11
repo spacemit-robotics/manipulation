@@ -1,0 +1,43 @@
+<mujoco model="headless_world_mapping">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0" integrator="implicitfast"/>
+  <default>
+    <geom type="sphere" size="0.05" mass="1" contype="0" conaffinity="0"/>
+  </default>
+  <worldbody>
+    <!-- Uncontrolled free-body qpos/qvel precede all controlled joints. -->
+    <body name="object" pos="0 0 2">
+      <freejoint name="object_free"/>
+      <geom/>
+    </body>
+    <body name="arm" pos="0 0 1">
+      <joint name="axis" type="hinge" axis="0 0 1" range="-1 1"/>
+      <geom pos="0.1 0 0"/>
+    </body>
+    <body name="passive" pos="0 1 1">
+      <joint name="auxiliary" type="hinge"/>
+      <geom pos="0.1 0 0"/>
+    </body>
+    <body name="finger" pos="0 2 1">
+      <joint name="opening" type="slide" axis="1 0 0" range="-0.2 0.2"/>
+      <geom/>
+    </body>
+  </worldbody>
+  <tendon>
+    <fixed name="finger_tendon">
+      <joint joint="opening" coef="1"/>
+    </fixed>
+  </tendon>
+  <!-- Actuator ordering deliberately differs from joint ordering. -->
+  <actuator>
+    <general name="gripper" tendon="finger_tendon" gainprm="1"
+             biasprm="0 -2 -0.1" biastype="affine" ctrlrange="-0.4 0.4"/>
+    <motor name="runaway" joint="auxiliary" group="1"/>
+    <position name="arm_position" joint="axis" kp="50" kv="5" ctrlrange="-1 1"/>
+    <position name="geared" joint="auxiliary" gear="2" kp="1" group="1"/>
+  </actuator>
+  <keyframe>
+    <key name="posed" time="0.5" qpos="0 0 2 1 0 0 0 0.3 -0.15 0.04"
+         qvel="0 0 0 0 0 0 0.1 0.2 0.3" ctrl="0.08 0 0.3 -0.3"/>
+  </keyframe>
+</mujoco>

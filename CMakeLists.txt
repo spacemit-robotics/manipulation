@@ -22,12 +22,28 @@ option(MANIPULATION_ENABLE_SIMULATION_RENDERER "Build the simulation viewer and 
 if(MANIPULATION_ENABLE_SIMULATION_RENDERER AND NOT MANIPULATION_ENABLE_MUJOCO)
     message(FATAL_ERROR "The simulation renderer requires MANIPULATION_ENABLE_MUJOCO=ON")
 endif()
-set(MANIPULATION_MUJOCO_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../simulation/mujoco" CACHE PATH
-    "MuJoCo simulation component source; otherwise use an installed mujoco_world package")
+set(_manipulation_mujoco_source "${CMAKE_CURRENT_SOURCE_DIR}/simulation/mujoco")
+if(DEFINED MANIPULATION_MUJOCO_SOURCE_DIR)
+    get_filename_component(_configured_mujoco_source "${MANIPULATION_MUJOCO_SOURCE_DIR}"
+        ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    get_filename_component(_sdk_mujoco_source "${CMAKE_CURRENT_SOURCE_DIR}/../../simulation/mujoco"
+        ABSOLUTE)
+    # Upgrade the SDK default in existing build trees while retaining explicit external sources.
+    if(_configured_mujoco_source STREQUAL _sdk_mujoco_source)
+        set(MANIPULATION_MUJOCO_SOURCE_DIR "${_manipulation_mujoco_source}" CACHE PATH
+            "MuJoCo physics source; otherwise use an installed mujoco_world package" FORCE)
+    endif()
+endif()
+set(MANIPULATION_MUJOCO_SOURCE_DIR "${_manipulation_mujoco_source}" CACHE PATH
+    "MuJoCo physics source; otherwise use an installed mujoco_world package")
 if(MANIPULATION_ENABLE_MUJOCO)
     if(EXISTS "${MANIPULATION_MUJOCO_SOURCE_DIR}/CMakeLists.txt")
-        # The arm backend does not change the humanoid simulator's defaults.
-        set(MUJOCO_BUILD_LEGACY_SIMULATOR OFF)
+        get_filename_component(_active_mujoco_source "${MANIPULATION_MUJOCO_SOURCE_DIR}"
+            ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+        if(NOT _active_mujoco_source STREQUAL _manipulation_mujoco_source)
+            # External providers may also offer a humanoid simulator; only use their physics API.
+            set(MUJOCO_BUILD_LEGACY_SIMULATOR OFF)
+        endif()
         set(MUJOCO_BUILD_RENDERER ${MANIPULATION_ENABLE_SIMULATION_RENDERER})
         add_subdirectory("${MANIPULATION_MUJOCO_SOURCE_DIR}" mujoco_world)
     else()

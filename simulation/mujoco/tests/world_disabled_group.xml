@@ -1,0 +1,4 @@
+<mujoco model="disabled_actuator_group">
+  <include file="world.xml"/>
+  <option actuatorgroupdisable="1"/>
+</mujoco>

@@ -1,5 +1,16 @@
 module: components/control/manipulation
 tests:
+  - name: manipulation-mujoco-world-contract
+    description: Named state, actuator mapping, reset and physical fault handling without rendering.
+    category: functional
+    scopes: [pr, scheduled, release]
+    timeout_s: 300
+    workdir: sdk
+    command: |
+      cmake -S components/control/manipulation/simulation/mujoco -B output/test/manipulation-mujoco-world -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+      cmake --build output/test/manipulation-mujoco-world -j2
+      ctest --test-dir output/test/manipulation-mujoco-world --output-on-failure
+
   - name: native-manipulation-contract
     description: Device contracts, Mock, Nero fake-SDK/IPC and signal tests; no device access.
     category: functional
@@ -31,3 +42,4 @@ tests:
       ctest --test-dir output/test/manipulation-mujoco --output-on-failure
       cmake --install output/test/manipulation-mujoco
       python3 components/control/manipulation/tests/check_simulation_install.py output/test/manipulation-mujoco/install
+      python3 components/control/manipulation/tests/check_simulation_build.py output/test/manipulation-mujoco/install

@@ -1,0 +1,20 @@
+<mujoco model="snapshot_contract">
+  <option timestep="0.01" gravity="0 0 0"/>
+  <worldbody>
+    <body name="anchor" pos="0 0 1">
+      <body name="pad"><geom type="sphere" size="0.1"/></body>
+    </body>
+    <body name="object" pos="0.15 0 1">
+      <freejoint/>
+      <geom type="sphere" size="0.1" mass="1"/>
+    </body>
+    <body name="other" pos="1 0 1"><geom type="sphere" size="0.1"/></body>
+    <body name="camera_carrier" pos="2 0 1.6">
+      <joint name="camera_height" type="slide" axis="0 0 1"/>
+      <geom type="sphere" size="0.01" mass="1"/>
+      <camera name="moving" pos="-2 0 0" fovy="60"/>
+    </body>
+  </worldbody>
+  <equality><weld name="attachment" body1="anchor" body2="other" active="false"/></equality>
+  <keyframe><key name="moving" qvel="0 0 0 0 0 0 1"/></keyframe>
+</mujoco>

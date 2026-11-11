@@ -1,0 +1,15 @@
+diff --git a/src/gl/framebuffers.c b/src/gl/framebuffers.c
+index 93194fc..fab636d 100644
+--- a/src/gl/framebuffers.c
++++ b/src/gl/framebuffers.c
+@@ -896,6 +896,9 @@ void APIENTRY_GL4ES gl4es_glFramebufferRenderbuffer(GLenum target, GLenum attach
+     if (attachment==GL_DEPTH_STENCIL_ATTACHMENT) {
+         // doesn't seems to be supported "as-is" on GLES on PVR
+         gl4es_glFramebufferRenderbuffer(target, GL_DEPTH_ATTACHMENT, renderbuffertarget, renderbuffer);
+-        gl4es_glFramebufferRenderbuffer(target, GL_STENCIL_ATTACHMENT, renderbuffertarget, renderbuffer);
++        // IMGTEC/PVR 等无 packed depth-stencil 时, renderbuffer 已被降级为纯深度(见 glRenderbufferStorage),
++        // 不能再挂到 STENCIL(否则 FBO 不完整 UNSUPPORTED); 仅硬件支持 packed depth-stencil 时挂 STENCIL.
++        if (!(hardext.depthstencil==0 || ((hardext.vendor&VEND_IMGTEC)==VEND_IMGTEC)))
++            gl4es_glFramebufferRenderbuffer(target, GL_STENCIL_ATTACHMENT, renderbuffertarget, renderbuffer);
+         return;
+     }

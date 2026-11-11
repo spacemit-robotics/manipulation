@@ -30,6 +30,7 @@
 | `runtime/` | 解析 `device.yaml`，经注册表创建设备 |
 | `drivers/<类别>/<型号>/` | 驱动实现与注册；`drivers/common/` 放共享连接 |
 | `drivers/simulation/mujoco/` | MuJoCo 机械臂与末端适配，共用一个物理世界 |
+| `simulation/mujoco/` | 仓内 MuJoCo 物理世界、快照、RGB-D 相机与窗口 |
 | `capabilities/<能力>/` | 可复用实现及其命令行入口 |
 | `descriptions/robots/<型号>/` | 配置模板、URDF、`model.json`、限位来源与许可 |
 | `descriptions/simulation/<场景>/` | MJCF 场景、关节与执行器映射、资源清单及模型许可 |
@@ -157,8 +158,9 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 
 ### 仿真模型接入
 
-`drivers/simulation/mujoco/` 实现统一 `Arm` 和 `EndEffector` 接口；
-物理步进由 `components/simulation/mujoco` 的 `World` 提供。公共控制层不依赖 MuJoCo 类型。
+`drivers/simulation/mujoco/` 实现统一 `Arm` 和 `EndEffector` 接口，物理步进由本仓库 `simulation/mujoco/` 的 `World` 提供。公共控制层不依赖 MuJoCo 类型。
+
+物理世界、快照与渲染接口见[仿真模块说明](../simulation/mujoco/README.md)。
 
 接入符合位置控制约定的其他机械臂或末端时：
 
