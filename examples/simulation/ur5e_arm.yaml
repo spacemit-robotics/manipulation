@@ -4,7 +4,7 @@
 schema_version: 3
 device:
     arm:
-        driver: mujoco
+        driver: mujoco_ur5e
         device_id: arm_main
         resource_id: simulation_ur5e_robotiq
         options:

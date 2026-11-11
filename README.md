@@ -7,7 +7,7 @@
 | `mock_device` | 软件模拟 | 无需硬件 |
 | `agx_nero_revo2` | 松灵 Nero 七轴，可选 Revo2 右手 | 点位、连续路径、定时轨迹；Revo2 无位置反馈 |
 | `so101` | SO101 五轴，可选原配夹爪 | 点位、使能与失能；夹爪按负载判断是否夹住；附舵机校准工具 |
-| `mujoco` | 物理仿真，附 UR5e + Robotiq 2F85 配置 | 关节点位、末端位置反馈与保持；按需构建 |
+| `mujoco_ur5e`、`mujoco_robotiq_2f85` | UR5e 机械臂与 Robotiq 2F-85 夹爪物理仿真 | 关节点位、末端位置反馈与保持；按需构建 |
 
 组件不自动使能、清错、归位或重试。设备独占、到位判定、取消、超时和故障锁定由设备会话统一处理。
 
@@ -17,7 +17,7 @@
 
 - **调用方**：C++ 应用链接组件库，在进程内使用 `DeviceSession`；命令行和 Python 应用使用 `DeviceClient`，它启动本机进程 `manipulation-device serve` 并经 JSONL 下发请求；YAML 点位任务由 `manipulation-device run` 执行。
 - **设备会话**：`core/` 的 `DeviceSession` 统一处理设备独占、到位判定、取消、超时和故障锁定，执行点位、连续路径、定时轨迹、目标跟随和末端执行器动作。
-- **驱动**：`runtime/` 经注册表装配设备，可独立选择机械臂与末端驱动，也兼容原有 `device.driver` 配置。驱动负责型号协议和单位转换；同一物理连接由共享连接工厂装配。
+- **驱动**：`runtime/` 经注册表装配设备，可独立选择机械臂与末端驱动，也支持整机 `device.driver` 配置。驱动负责型号协议和单位转换；同一物理连接由共享连接工厂装配。
 - **设备**：Nero 驱动经独立 worker 进程调用厂商 SDK pyAgxArm，SO101 驱动经 `motor` 组件访问舵机总线。
 - **能力与工具**：运动学和手眼标定从 `device.yaml` 与 `descriptions/` 取得关节和模型，不写死型号；`so101-calibrate` 直接读写舵机寄存器，用于舵机校准。
 
@@ -43,7 +43,7 @@ manipulation drivers
 manipulation drivers --roles
 ```
 
-列表只包含已启用构建的驱动。`mock_device` 是整机驱动，`mock` 是角色驱动；`mujoco` 只注册角色，启用对应构建选项后才出现在 `--roles` 列表中。
+列表只包含已启用构建的驱动。`mock_device` 是整机驱动，`mock` 是角色驱动；`mujoco_ur5e` 和 `mujoco_robotiq_2f85` 分别注册机械臂与末端角色，启用仿真构建选项后出现在 `--roles` 列表中。
 
 ## 2. 运行 Mock
 
@@ -57,10 +57,10 @@ manipulation demo
 
 `device.arm.driver` 与 `device.effector.driver` 分别选择机械臂和末端；各自的 `options` 保存连接参数。
 
-| 角色 | 已注册驱动 |
+| 角色 | 随附设备驱动 |
 | --- | --- |
-| 机械臂 | `mock`、`nero`、`so101`、`mujoco`（按需构建） |
-| 末端执行器 | `mock`、`revo2`、`so101_gripper`、`mujoco`（按需构建） |
+| 机械臂 | `mock`、`nero`、`so101`、`mujoco_ur5e`（按需构建） |
+| 末端执行器 | `mock`、`revo2`、`so101_gripper`、`mujoco_robotiq_2f85`（按需构建） |
 
 不同连接分别填写 `resource_id`；共用连接时使用相同标识，且该驱动对须注册共享连接工厂。
 Nero / Revo2、SO101 / 原配夹爪和 MuJoCo 仿真角色已提供共享连接。软件组合不代表机械安装、电气连接或应用动作兼容。
@@ -106,10 +106,10 @@ manipulation run --plan examples/simulation/ur5e_robotiq.yaml
 示例执行六轴机械臂点位和 Robotiq 2F85 夹爪开合；仅机械臂使用 `examples/simulation/ur5e_arm.yaml`。
 模型网格按固定版本下载并校验，MuJoCo 库由构建系统获取。`MANIPULATION_ENABLE_MUJOCO` 默认关闭。
 
-- 机械臂与末端分别选择 `mujoco` 驱动；相同 `resource_id` 和 `mapping_file` 共用一个物理世界。
+- 机械臂选择 `mujoco_ur5e`，夹爪选择 `mujoco_robotiq_2f85`；相同 `resource_id` 和 `mapping_file` 共用一个物理世界。
 - 每次设备会话创建独立仿真，从模型初始状态开始；连续交互使用同一个 `DeviceClient`，不同命令行进程不保留上次仿真状态。
 - 反馈取自物理引擎中的关节位置和速度，不使用目标值代替。夹爪到位不表示已抓稳物体。
-- 连续路径和定时轨迹尚不支持。
+- 不支持连续路径和定时轨迹。
 
 需要窗口、模拟相机或跨机控制时，安装图形依赖并构建仿真服务：
 
@@ -148,7 +148,7 @@ mm -DMANIPULATION_ENABLE_MUJOCO_REMOTE=ON \
 
 完整视觉抓取示例位于 `application/ros2/linksee/perceptive_grasp`，使用 UR5e、Robotiq 2F85、模拟 RGB-D 和桌面物体场景。
 
-其他模型通过 MJCF 场景和关节、执行器映射接入，不需要新增型号分支。映射字段见[接口参考](docs/reference.md#仿真映射)。
+其他模型通过 MJCF 场景和通用映射驱动接入，步骤见[仿真模型接入](docs/development.md#仿真模型接入)，映射字段见[接口参考](docs/reference.md#仿真映射)。
 
 ## 3. 现场目录与当前设备
 
@@ -369,8 +369,6 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 - **无反馈末端执行器**：开环执行；取消或中断后结果为 `stop_unknown`，须现场检查后重新连接。
 - **碰撞检测**：不提供；`pose-move`、`line-move` 只检查关节限位。
 - **机械臂数量**：只支持单臂。
-
-**验收范围（截至 2026-11-11）**：K3 隔离环境的公共控制回归 19/19、公共仿真回归 22/22 通过，模拟 RGB-D 和应用仿真抓取已验证。实体 SO101 抓取、现场相机采集及 K3 实际桌面/GPU 显示尚未验收；验证未修改 K3 正式安装目录。
 
 ## 目录结构
 

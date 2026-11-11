@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real physics contract through public roles, not direct engine or MuJoCo APIs.
 #include "manipulation/device_plan.h"
+#include "manipulation/mujoco_driver.h"
 
 #include <unistd.h>
 
@@ -183,7 +184,19 @@ int main(int argc, char** argv) {
         try {
             TestCachedSamples(plan, registry);
             TestConcurrentRoleLifecycle(plan, registry);
-            TestShared(plan, registry, directory);
+            Check(m::IsMujocoArmDriver("mujoco_ur5e") &&
+                            !m::IsMujocoArmDriver("mujoco_robotiq_2f85") &&
+                            m::IsMujocoEffectorDriver("mujoco_robotiq_2f85") &&
+                            !m::IsMujocoEffectorDriver("mujoco_ur5e"),
+                    "MuJoCo role classification mixed models");
+            for (const auto* arm_name : {"mujoco_mapped_arm", "mujoco"}) {
+                for (const auto* effector_name : {"mujoco_mapped_effector", "mujoco"}) {
+                    auto compatible = plan;
+                    compatible.composition.arm_driver = arm_name;
+                    compatible.composition.effector_driver = effector_name;
+                    TestShared(compatible, registry, directory);
+                }
+            }
             TestCancellationAndTimeout(plan, registry, directory);
         } catch (...) {
             std::filesystem::remove_all(temporary);

@@ -21,6 +21,7 @@
 #include <utility>
 
 #include "manipulation/device_plan.h"
+#include "manipulation/mujoco_driver.h"
 #include "manipulation/mujoco_runtime.h"
 #include "session_backend.h"
 #include "wire_protocol.h"
@@ -44,12 +45,12 @@ void Reject(bool condition, const char* message) {
 }
 
 const DriverOptions& LocalOptions(const DevicePlan& plan) {
-    Require(plan.driver.empty() && plan.composition.arm_driver == "mujoco",
+    Require(plan.driver.empty() && IsMujocoArmDriver(plan.composition.arm_driver),
             "simulation server accepts only independently selected mujoco roles");
     const auto& options = plan.composition.arm_options;
     Require(!s::ParseTransport(options).remote, "simulation server needs a local plan");
     if (!plan.definition.effector.channels.empty()) {
-        Require(plan.composition.effector_driver == "mujoco" &&
+        Require(IsMujocoEffectorDriver(plan.composition.effector_driver) &&
                         plan.definition.arm.resource_id == plan.definition.effector.resource_id &&
                         !s::ParseTransport(plan.composition.effector_options).remote &&
                         s::LoadMapping(options).filename ==

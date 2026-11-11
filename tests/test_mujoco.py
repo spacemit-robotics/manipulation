@@ -56,7 +56,7 @@ class MujocoTests(unittest.TestCase):
             schema_version=3,
             device=dict(
                 arm=dict(
-                    driver="mujoco",
+                    driver="mujoco_mapped_arm",
                     device_id="arm",
                     resource_id="mujoco_test_world",
                     joints=[
@@ -67,7 +67,7 @@ class MujocoTests(unittest.TestCase):
                     options=dict(mapping_file="mapping.json"),
                 ),
                 effector=dict(
-                    driver="mujoco",
+                    driver="mujoco_mapped_effector",
                     device_id="tool",
                     resource_id="mujoco_test_world",
                     channels=["gripper"],

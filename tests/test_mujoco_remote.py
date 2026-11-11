@@ -91,7 +91,7 @@ class MujocoRemoteTests(unittest.TestCase):
             schema_version=3,
             device=dict(
                 arm=dict(
-                    driver="mujoco",
+                    driver="mujoco_mapped_arm",
                     device_id="arm",
                     resource_id="remote_contract",
                     joints=[
@@ -103,7 +103,7 @@ class MujocoRemoteTests(unittest.TestCase):
                     options=dict(mapping_file="mapping.yaml"),
                 ),
                 effector=dict(
-                    driver="mujoco",
+                    driver="mujoco_mapped_effector",
                     device_id="tool",
                     resource_id="remote_contract",
                     channels=["gripper"],

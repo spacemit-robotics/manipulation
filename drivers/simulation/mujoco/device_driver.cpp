@@ -1,16 +1,19 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
-// Model-independent role registration and offline mapping validation.
+// Model-specific and configurable mapping roles with offline validation.
 #include "session_backend.h"
 
 #include <yaml-cpp/yaml.h>
 
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>  // NOLINT(build/c++17): target explicitly requires C++17.
 #include <set>
 #include <stdexcept>
 #include <utility>
 
+#include "manipulation/mujoco_driver.h"
 #include "manipulation/resource_paths.h"
 #include "remote_session.h"
 #if MANIPULATION_HAS_MUJOCO_LOCAL
@@ -279,43 +282,110 @@ void ValidateEffectorMapping(const EffectorConfig& config, const Mapping& mappin
                 "MuJoCo effector mapping must follow configured channel order");
     }
 }
+
+std::string ModelPrefix(const std::string& name, const std::string& suffix) {
+    Require(name.size() >= suffix.size() &&
+                    name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0,
+            "MuJoCo model mapping name must end with " + suffix);
+    return name.substr(0, name.size() - suffix.size());
+}
+
+void ValidateUr5eMapping(const Mapping& mapping) {
+    const std::array<std::string, 6> actuators{
+            "shoulder_pan", "shoulder_lift", "elbow", "wrist_1", "wrist_2", "wrist_3"};
+    Require(mapping.arm.size() == actuators.size(), "mujoco_ur5e requires six arm joints");
+    const auto prefix = ModelPrefix(mapping.arm.front().joint, "shoulder_pan_joint");
+    for (std::size_t index = 0; index < actuators.size(); ++index) {
+        Require(mapping.arm[index].joint == prefix + actuators[index] + "_joint" &&
+                        mapping.arm[index].actuator == prefix + actuators[index],
+                "mujoco_ur5e requires ordered UR5e joint/actuator names with one prefix");
+    }
+}
+
+void ValidateRobotiqMapping(const Mapping& mapping) {
+    Require(mapping.effector.size() == 1, "mujoco_robotiq_2f85 requires one gripper channel");
+    const auto& effector = mapping.effector.front();
+    const auto prefix = ModelPrefix(effector.joint, "gripper_right_driver_joint");
+    Require(effector.channel == "gripper" &&
+                    effector.actuator == prefix + "gripper_fingers_actuator" &&
+                    std::abs(effector.joint_closed - 0.8) <= 1e-6 &&
+                    std::abs(effector.joint_open) <= 1e-6 &&
+                    std::abs(effector.control_closed - 255.0) <= 1e-6 &&
+                    std::abs(effector.control_open) <= 1e-6,
+            "mujoco_robotiq_2f85 requires the Robotiq 2F-85 mapping and endpoints");
+}
 }  // namespace spacemit::manipulation::simulation
 
 namespace spacemit::manipulation {
+namespace {
+constexpr std::array<const char*, 3> kMujocoArmDrivers{
+        "mujoco_ur5e", "mujoco_mapped_arm", "mujoco"};
+constexpr std::array<const char*, 3> kMujocoEffectorDrivers{
+        "mujoco_robotiq_2f85", "mujoco_mapped_effector", "mujoco"};
+}  // namespace
+
+bool IsMujocoArmDriver(const std::string& name) {
+    return std::find(kMujocoArmDrivers.begin(), kMujocoArmDrivers.end(), name) !=
+            kMujocoArmDrivers.end();
+}
+
+bool IsMujocoEffectorDriver(const std::string& name) {
+    return std::find(kMujocoEffectorDrivers.begin(), kMujocoEffectorDrivers.end(), name) !=
+            kMujocoEffectorDrivers.end();
+}
+
 void RegisterMujocoDevice(DeviceRegistry* registry) {
     namespace s = simulation;
-    registry->RegisterArm({"mujoco", 1,
-            [](const DeviceConfig& config, const DriverOptions& options) {
-                s::ValidateArmMapping(config, s::LoadMapping(options));
-            },
-            [](const DeviceConfig& config, const DriverOptions& options) {
-                return s::WrapSession(s::CreateSession(options, config, std::nullopt), true, false)
-                        .arm;
-            },
-            s::Resolve});
-    registry->RegisterEffector({"mujoco", 1,
-            [](const EffectorConfig& config, const DriverOptions& options) {
-                s::ValidateEffectorMapping(config, s::LoadMapping(options));
-            },
-            [](const EffectorConfig& config, const DriverOptions& options) {
-                return s::WrapSession(s::CreateSession(options, std::nullopt, config), false, true)
-                        .effector;
-            },
-            s::Resolve});
-    registry->RegisterShared({"mujoco", "mujoco",
-            [](const DeviceDefinition&, const DriverOptions& arm, const DriverOptions& effector) {
-                if (s::LoadMapping(arm).filename != s::LoadMapping(effector).filename) {
-                    throw std::runtime_error("shared MuJoCo roles require the same mapping_file");
-                }
-                const auto first = s::ParseTransport(arm);
-                const auto second = s::ParseTransport(effector);
-                if (first.remote != second.remote || first.host != second.host ||
-                        first.port != second.port)
-                    throw std::runtime_error("shared MuJoCo roles require the same transport");
-            },
-            [](const DeviceDefinition& config, const DriverOptions& arm, const DriverOptions&) {
-                return s::WrapSession(
-                        s::CreateSession(arm, config.arm, config.effector), true, true);
-            }});
+    for (const auto* name : kMujocoArmDrivers) {
+        registry->RegisterArm({name, 1,
+                [model_specific = std::string(name) == "mujoco_ur5e"](
+                        const DeviceConfig& config, const DriverOptions& options) {
+                    const auto mapping = s::LoadMapping(options);
+                    s::ValidateArmMapping(config, mapping);
+                    if (model_specific) s::ValidateUr5eMapping(mapping);
+                },
+                [](const DeviceConfig& config, const DriverOptions& options) {
+                    return s::WrapSession(s::CreateSession(options, config, std::nullopt), true,
+                            false).arm;
+                },
+                s::Resolve});
+    }
+    for (const auto* name : kMujocoEffectorDrivers) {
+        registry->RegisterEffector({name, 1,
+                [model_specific = std::string(name) == "mujoco_robotiq_2f85"](
+                        const EffectorConfig& config, const DriverOptions& options) {
+                    const auto mapping = s::LoadMapping(options);
+                    s::ValidateEffectorMapping(config, mapping);
+                    if (model_specific) s::ValidateRobotiqMapping(mapping);
+                },
+                [](const EffectorConfig& config, const DriverOptions& options) {
+                    return s::WrapSession(s::CreateSession(options, std::nullopt, config), false,
+                            true).effector;
+                },
+                s::Resolve});
+    }
+    for (const auto* arm_name : kMujocoArmDrivers) {
+        for (const auto* effector_name : kMujocoEffectorDrivers) {
+            registry->RegisterShared({arm_name, effector_name,
+                    [](const DeviceDefinition&, const DriverOptions& arm,
+                            const DriverOptions& effector) {
+                        if (s::LoadMapping(arm).filename != s::LoadMapping(effector).filename) {
+                            throw std::runtime_error(
+                                    "shared MuJoCo roles require the same mapping_file");
+                        }
+                        const auto first = s::ParseTransport(arm);
+                        const auto second = s::ParseTransport(effector);
+                        if (first.remote != second.remote || first.host != second.host ||
+                                first.port != second.port)
+                            throw std::runtime_error(
+                                    "shared MuJoCo roles require the same transport");
+                    },
+                    [](const DeviceDefinition& config, const DriverOptions& arm,
+                            const DriverOptions&) {
+                        return s::WrapSession(
+                                s::CreateSession(arm, config.arm, config.effector), true, true);
+                    }});
+        }
+    }
 }
 }  // namespace spacemit::manipulation

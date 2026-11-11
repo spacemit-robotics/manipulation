@@ -104,12 +104,6 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 
 ## 4. 新增驱动
 
-运动学不放入设备驱动。应用通过 `manipulation/kinematics.h` 创建独立求解器，
-设备与模型使用完全相同的关节顺序。新增算法实现 `Kinematics`，通过
-`KinematicsRegistry::Register` 注册工厂；未注册的名称明确报错，不回退到其他算法。
-Linksee `perceptive_grasp` 的真机执行器使用该接口，标定采集复用公共 `FeedbackPort`、
-`capture_sample` 和 `CalibrationSession`；相机采集及业务策略仍由应用提供。
-
 1. 在 `drivers/arms/<型号>/` 实现接口和注册函数：
 
    ```cpp
@@ -159,11 +153,11 @@ Linksee `perceptive_grasp` 的真机执行器使用该接口，标定采集复�
 
 1. 在 `descriptions/simulation/<场景>/` 放置 MJCF、资源清单与模型许可。
 2. 提供 `mapping.yaml`，按名称映射关节和执行器；末端明确闭合、张开的控制值与反馈端点。
-3. 在设备配置中分别选择 `mujoco` 角色。共用一个世界时，使用相同的 `resource_id` 和映射文件。
+3. 自定义模型在设备配置中选择 `mujoco_mapped_arm` 和 `mujoco_mapped_effector`。随附 UR5e 与 Robotiq 2F-85 模型分别使用 `mujoco_ur5e` 和 `mujoco_robotiq_2f85`。共用一个世界时，使用相同的 `resource_id` 和映射文件。
 4. 在 `examples/simulation/` 提供点位任务，检查实际反馈、停止、越界拒绝与超时。
 
-这类模型接入不新增驱动名称或公共 API。需要力矩控制、复杂手部传动或新物理引擎时，
-实现对应后端并注册，不通过放宽映射校验伪装成已支持。
+符合通用映射约定的模型无需新增驱动或公共 API。需要力矩控制、复杂手部传动或新物理引擎时，
+实现对应后端，定义其控制与反馈能力，再注册驱动。
 MJCF 不替代运动学与手眼标定所需的 URDF 和 `model.json`。
 
 需要共享窗口、相机和控制时，由 `MujocoRuntime` 持有世界，通过 `CreateDevices()` 交给 `DeviceSession`。
@@ -258,6 +252,13 @@ Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样�
 - 应用配置中的路径相对配置文件解析，便于整体迁移。
 - 结果区分命令完成、位置到位和实物抓稳；`physical_grip_verified` 只能由实际的抓持证据（如驱动的抓握判断）置为真。
 - 末端位姿目标用 `spacemit_manipulation.urdf_ik` 求逆解，`converged` 为真后再交给 `DeviceClient` 执行。
+
+### C++ 运动学
+
+应用通过 `manipulation/kinematics.h` 创建独立求解器，链接 `spacemit::manipulation_kinematics`。
+运动学不放入设备驱动；设备与模型使用相同的关节顺序，求解器不访问硬件。
+新增算法实现 `Kinematics`，通过 `KinematicsRegistry::Register` 注册工厂；未注册的名称报错，不回退到其他算法。
+求解结果只满足运动学与关节限位约束，应用负责碰撞和任务约束检查，再通过设备会话执行。
 
 ## 7. 验证
 

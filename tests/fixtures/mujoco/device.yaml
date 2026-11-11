@@ -1,7 +1,7 @@
 schema_version: 3
 device:
   arm:
-    driver: mujoco
+    driver: mujoco_mapped_arm
     device_id: simulation_arm
     resource_id: mujoco_fixture_world
     joints:
@@ -11,7 +11,7 @@ device:
     tolerance_rad: 0.005
     options: {mapping_file: mapping.yaml}
   effector:
-    driver: mujoco
+    driver: mujoco_mapped_effector
     device_id: simulation_tool
     resource_id: mujoco_fixture_world
     channels: [gripper]

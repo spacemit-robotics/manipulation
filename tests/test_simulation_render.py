@@ -41,7 +41,7 @@ def main():
             "steps": [],
             "device": {
                 "arm": {
-                    "driver": "mujoco",
+                    "driver": "mujoco_mapped_arm",
                     "device_id": "arm",
                     "resource_id": "render_test",
                     "joints": [

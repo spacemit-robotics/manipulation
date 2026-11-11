@@ -356,6 +356,10 @@ if(BUILD_TESTING)
         endif()
     endif()
     if(MANIPULATION_ENABLE_MUJOCO OR MANIPULATION_ENABLE_MUJOCO_REMOTE)
+        add_test(NAME manipulation_simulation_driver_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulation_drivers.py)
+        set_tests_properties(manipulation_simulation_driver_contract PROPERTIES TIMEOUT 30
+            ENVIRONMENT "${test_environment};MANIPULATION_TEST_MUJOCO=$<BOOL:${MANIPULATION_ENABLE_MUJOCO}>")
         add_test(NAME manipulation_simulation_camera_contract COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulation_camera.py)
         set_tests_properties(manipulation_simulation_camera_contract PROPERTIES TIMEOUT 60

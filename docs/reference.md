@@ -75,9 +75,11 @@ steps: []
 | 机械臂 `nero`、末端 `revo2` | `channel`、`python`、`sdk_root`、`worker`；各自资源标识须为 `agx_<channel>` |
 | 机械臂 `so101` | `port`、`arm_ids`、`arm_calibration`、`max_velocity_rad_s` |
 | 末端 `so101_gripper` | `port`、`gripper_id`、`gripper_calibration`、`max_velocity_rad_s`、`grip_load_threshold` |
-| 机械臂 `mujoco`、末端 `mujoco` | `mapping_file`：仿真映射文件，相对设备配置所在目录解析 |
+| 机械臂 `mujoco_ur5e`、末端 `mujoco_robotiq_2f85` | UR5e 与 Robotiq 2F-85 模型；`mapping_file` 指定仿真映射文件，相对设备配置所在目录解析 |
+| 机械臂 `mujoco_mapped_arm`、末端 `mujoco_mapped_effector` | 自定义模型；选项与型号仿真驱动相同，关节和执行器由映射定义 |
 
-各硬件选项含义与下表的整机驱动一致。`nero + revo2`、`so101 + so101_gripper` 和 `mujoco + mujoco` 已登记共享连接；SO101 共享配置中重复提供的选项须一致。
+各硬件选项含义与下表的整机驱动一致。`nero + revo2`、`so101 + so101_gripper` 及同一映射下的仿真机械臂与末端可共享连接；SO101 共享配置中重复提供的选项须一致。
+`mujoco` 可作为通用映射角色的兼容输入名称；设备配置使用型号驱动名或上述通用映射驱动名。
 
 ### 仿真映射
 
@@ -95,6 +97,13 @@ steps: []
 `maximum_age_s` 是接收端反馈时限：服务端检查本地采样年龄，客户端检查源采样年龄加网络往返耗时，
 两端可分别配置。远程示例使用 `1.0` 秒，超过时限仍停止当前任务，不自动重试。
 映射采用单个 YAML 文档，最多 256 KiB，拒绝未知或重复字段。
+
+型号驱动还要求映射与对应设备一致：
+
+- `mujoco_ur5e`：六个关节依次为 `shoulder_pan_joint`、`shoulder_lift_joint`、`elbow_joint`、`wrist_1_joint`、`wrist_2_joint`、`wrist_3_joint`；执行器名称分别去掉 `_joint`。所有关节和执行器可使用同一个名称前缀，例如 `robot_`。
+- `mujoco_robotiq_2f85`：单个 `gripper` 通道，使用位置反馈；关节为 `gripper_right_driver_joint`，执行器为 `gripper_fingers_actuator`，两者可使用同一个名称前缀。`joint_closed` / `joint_open` 为 `0.8` / `0.0`，`control_closed` / `control_open` 为 `255.0` / `0.0`，数值容差为 `1e-6`。
+
+其他模型使用 `mujoco_mapped_arm` 和 `mujoco_mapped_effector`，按下表定义映射。
 
 | 字段 | 类型 / 默认值 | 含义 |
 | --- | --- | --- |
@@ -121,7 +130,7 @@ steps: []
 物理软限位允许端点附近的小幅超出：不超过末端到位容差与 `0.01` 的较小值时，位置显示为对应端点；
 超过该范围则报错。运动状态仍使用实际速度，不因端点显示而认定停止。
 
-相同 `resource_id` 的两个 `mujoco` 角色必须引用同一个映射文件，并共用物理世界和步进线程。
+相同 `resource_id` 的仿真机械臂与末端必须引用同一个映射文件，并共用物理世界和步进线程。
 本地模式中，不同资源标识创建不同世界，即使使用相同场景；世界随设备会话创建和销毁。
 远程模式中，服务端持有世界，连接或关闭客户端不重置场景。服务端租约拒绝第二个控制者，客户端更换 `resource_id` 不能绕过它。
 引擎采样时间、位置和速度参与会话的到位、过期、取消与超时判定。
@@ -290,7 +299,7 @@ steps: []
 | 子命令 | 参数与说明 |
 | --- | --- |
 | `check` | `--profile build\|control\|vision`；`vision` 另检查 OpenCV、SciPy、`pyrealsense2` |
-| `drivers [--roles]` | 只列已启用构建的驱动；默认整机注册列表，`--roles` 改为独立角色列表；`mujoco` 只出现在角色列表 |
+| `drivers [--roles]` | 只列已启用构建的驱动；默认整机注册列表，`--roles` 改为独立角色列表；仿真驱动按机械臂和末端角色列出 |
 | `configure MODEL` | 生成 `SITE/MODEL/device.yaml` 并设为当前设备；`--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD`；不覆盖已有文件 |
 | `use [NAME]` | 把 `SITE/NAME/device.yaml` 设为当前设备；省略 `NAME` 时只列出已配置的设备，`*` 标记当前设备 |
 | `validate` / `inspect` / `capabilities` | 同 `manipulation-device` 对应子命令 |
