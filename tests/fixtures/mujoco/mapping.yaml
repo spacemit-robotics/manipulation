@@ -1,0 +1,17 @@
+schema_version: 1
+scene: scene.xml
+initial_keyframe: start
+arm:
+  - {joint: second_joint, actuator: second_servo, max_velocity_rad_s: 0.6}
+  - {joint: first_joint, actuator: first_servo, max_velocity_rad_s: 0.6}
+effector:
+  - channel: gripper
+    joint: finger_joint
+    actuator: finger_servo
+    joint_closed: 1
+    joint_open: 0
+    control_closed: 1
+    control_open: 0
+arm_moving_threshold_rad_s: 0.004
+effector_moving_threshold: 0.004
+hold_timeout_s: 3

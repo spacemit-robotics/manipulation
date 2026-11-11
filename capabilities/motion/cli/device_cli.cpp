@@ -160,7 +160,8 @@ int main(int argc, char** argv) {
         if (enable) session.EnableArm();
         const auto result = m::RunDeviceSteps(session, plan.steps, [] { return interrupted != 0; });
         std::cout << "{\"status\":\"" << m::ResultName(result.status);
-        std::cout << "\",\"physical_grip_verified\":false}\n";
+        std::cout << "\",\"detail\":" << JsonString(result.detail);
+        std::cout << ",\"physical_grip_verified\":false}\n";
         // 3: every step was delivered, but open-loop effector steps were not measured.
         if (result.status == m::Result::kUnverified) return 3;
         return result.status == m::Result::kSucceeded ? 0 : 1;

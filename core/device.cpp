@@ -353,7 +353,8 @@ void DeviceSession::SetEffectorEnabled(bool enabled) {
     }
     const auto arm = ReadArm();
     const auto tool = ReadEffector();
-    if (arm.fault || arm.moving || arm.command_active || tool.fault || tool.moving) {
+    if (arm.fault || arm.moving || arm.command_active || tool.fault || tool.moving ||
+            tool.command_active) {
         throw CommandRejected("cannot change torque while arm or effector is faulted or moving");
     }
     bool written = false;  // A rejection after the driver call is not "nothing written".
@@ -534,9 +535,14 @@ CommandResult DeviceSession::RunArm(const std::function<CommandResult()>& submit
         return {++p.command_id, Result::kCancelled, "cancelled before submission"};
     if (p.effector) {
         const auto tool = ReadEffector();
-        Check(!tool.fault && !tool.moving, "effector faulted or busy before arm motion");
+        Check(!tool.fault, "effector faulted before arm motion");
         Check(effector.empty() || !tool.enabled.has_value() || *tool.enabled,
                 "effector disabled before scheduled targets");
+        if (tool.moving || tool.command_active) {
+            Check(!tool.enabled.has_value() || *tool.enabled,
+                    "effector disabled before arm motion");
+            throw BusyRejected("effector busy before arm motion");
+        }
     }
     auto result = submit();
     const auto started = Clock::now();
@@ -623,8 +629,9 @@ CommandResult DeviceSession::MoveEffector(
     };
     const double allowed = distance(arm.joints_rad) + kToolArmDrift;
     const auto before = ReadEffector();
-    Check(!before.fault && !before.moving, "effector faulted or busy");
+    Check(!before.fault, "effector faulted");
     Check(!before.enabled.has_value() || *before.enabled, "effector disabled");
+    if (before.moving || before.command_active) throw BusyRejected("effector busy");
     const bool open_loop = p.definition.effector.feedback == EffectorFeedback::kNone;
     if (point.duration_s > p.definition.effector.timeout_s)
         throw CommandRejected("effector duration_s exceeds the effector timeout_s");
@@ -671,14 +678,16 @@ CommandResult DeviceSession::MoveEffector(
             Check(!state.fault && state.sample_id >= last, "effector fault/sequence regression");
             if (!open_loop && state.sample_id > last && state.received_at > submitted) {
                 last = state.sample_id;
-                bool reached = !state.moving;
+                bool reached = !state.moving && !state.command_active;
                 for (std::size_t i = 0; i < point.positions.size(); ++i) {
                     reached = reached &&
                             std::abs(state.positions[i] - point.positions[i]) <=
                                     p.definition.effector.tolerance;
                 }
                 settled = reached ? settled + 1 : 0;
-                gripping = !state.moving && state.holding.value_or(false) ? gripping + 1 : 0;
+                gripping = !state.moving && !state.command_active && state.holding.value_or(false)
+                        ? gripping + 1
+                        : 0;
                 if (settled >= 3)
                     return {result.command_id, Result::kSucceeded, "effector_position_reached"};
                 // Stopped on an object short of a closing target: a grasp, not a failure to reach.

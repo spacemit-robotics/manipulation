@@ -1,0 +1,20 @@
+<!-- Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd. -->
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<mujoco model="ur5e_robotiq_scene">
+    <compiler angle="radian" autolimits="true"/>
+    <option timestep="0.002" integrator="implicitfast" cone="elliptic"/>
+    <asset>
+        <model name="ur5e_robotiq" file="models/universal_robots_ur5e/ur5e_robotiq_2f85.xml"/>
+    </asset>
+    <visual>
+        <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+        <global azimuth="135" elevation="-25"/>
+    </visual>
+    <statistic center="0 0 0.4" extent="1.2"/>
+    <worldbody>
+        <attach model="ur5e_robotiq" body="base" prefix=""/>
+        <camera name="overview" pos="1.4 -1.4 1.3" xyaxes="0.707107 0.707107 0 -0.408248 0.408248 0.816497" fovy="50"/>
+        <light name="overhead" pos="0 0 2" dir="0 0 -1" directional="true"/>
+        <geom name="floor" type="plane" size="0 0 0.05" rgba="0.25 0.28 0.30 1"/>
+    </worldbody>
+</mujoco>

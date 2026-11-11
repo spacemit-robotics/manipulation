@@ -75,8 +75,87 @@ steps: []
 | 机械臂 `nero`、末端 `revo2` | `channel`、`python`、`sdk_root`、`worker`；各自资源标识须为 `agx_<channel>` |
 | 机械臂 `so101` | `port`、`arm_ids`、`arm_calibration`、`max_velocity_rad_s` |
 | 末端 `so101_gripper` | `port`、`gripper_id`、`gripper_calibration`、`max_velocity_rad_s`、`grip_load_threshold` |
+| 机械臂 `mujoco`、末端 `mujoco` | `mapping_file`：仿真映射文件，相对设备配置所在目录解析 |
 
-各选项含义与下表的整机驱动一致。`nero + revo2` 和 `so101 + so101_gripper` 已登记共享连接；SO101 共享配置中重复提供的选项须一致。
+各硬件选项含义与下表的整机驱动一致。`nero + revo2`、`so101 + so101_gripper` 和 `mujoco + mujoco` 已登记共享连接；SO101 共享配置中重复提供的选项须一致。
+
+### 仿真映射
+
+`MANIPULATION_ENABLE_MUJOCO=ON` 构建本地引擎与远程客户端；
+`MANIPULATION_ENABLE_MUJOCO_REMOTE=ON` 可单独构建远程客户端。
+
+| 驱动选项 | 默认值 | 含义 |
+| --- | --- | --- |
+| `mapping_file` | 必填 | 相对设备配置所在目录解析的映射文件 |
+| `transport` | 本地 | `tcp` 选择远程连接；本地配置只填写 `mapping_file` |
+| `host` | `127.0.0.1` | 远程连接的回环地址；跨机使用 SSH 转发 |
+| `port` | `9100` | 远程服务端口 |
+
+远程连接先比较角色、关节、限位和映射契约；不向服务端传递模型路径，也不加载客户端场景。
+`maximum_age_s` 是接收端反馈时限：服务端检查本地采样年龄，客户端检查源采样年龄加网络往返耗时，
+两端可分别配置。远程示例使用 `1.0` 秒，超过时限仍停止当前任务，不自动重试。
+映射采用单个 YAML 文档，最多 256 KiB，拒绝未知或重复字段。
+
+| 字段 | 类型 / 默认值 | 含义 |
+| --- | --- | --- |
+| `schema_version` | 整数，必填 `1` | 映射格式 |
+| `scene` | 字符串，必填 | MJCF 文件，相对映射文件解析 |
+| `initial_keyframe` | 字符串，可省略 | 初始关键帧；省略时使用模型默认状态 |
+| `arm` | 列表，最多 16 项 | 与设备配置的关节名称和顺序一致 |
+| `arm[].joint` / `actuator` | 字符串，必填 | 模型中的关节名和执行器名 |
+| `arm[].max_velocity_rad_s` | 数值，必填，`(0,10]` | 速度倍率为 1 时的目标变化速率，rad/s |
+| `effector` | 列表，最多 32 项 | 与设备配置的末端通道名称和顺序一致 |
+| `effector[].channel` / `joint` / `actuator` | 字符串，必填 | 通道名、反馈关节名和执行器名 |
+| `effector[].joint_closed` / `joint_open` | 数值，必填且不同 | 闭合 / 张开的关节坐标，使用模型关节单位 |
+| `effector[].control_closed` / `control_open` | 数值，必填且不同 | 闭合 / 张开的执行器控制值 |
+| `arm_moving_threshold_rad_s` | 数值，默认 `0.002` | 机械臂静止阈值，rad/s，`(0,0.1]` |
+| `effector_moving_threshold` | 数值，默认 `0.002` | 末端静止阈值，归一化位置/s，`(0,0.1]` |
+| `hold_timeout_s` | 数值，默认 `2` | 保持确认期限，s，`(0,10]` |
+| `synchronized_joint_point` | 布尔，默认 `false` | 各关节参考值按共同时间插值；`false` 为各轴独立限速 |
+
+机械臂使用转动关节和单位传动比的位置执行器；末端支持直接关节或固定关节腱传动的仿射位置执行器。
+执行器必须实际驱动对应的反馈关节，各角色的受控关节不能重叠；不支持空间腱传动。
+初始状态须静止且控制值与位置匹配；连接时拒绝被模型禁用的执行器，不自动改写初始目标。
+`speed_scale` 缩放目标变化速率，不保证带载时的实际关节速度。
+末端需要 `feedback: position`，归一化位置始终为 `0` 闭合、`1` 张开，不报告抓稳判断；动作时长不得小于模型时间步。
+物理软限位允许端点附近的小幅超出：不超过末端到位容差与 `0.01` 的较小值时，位置显示为对应端点；
+超过该范围则报错。运动状态仍使用实际速度，不因端点显示而认定停止。
+
+相同 `resource_id` 的两个 `mujoco` 角色必须引用同一个映射文件，并共用物理世界和步进线程。
+本地模式中，不同资源标识创建不同世界，即使使用相同场景；世界随设备会话创建和销毁。
+远程模式中，服务端持有世界，连接或关闭客户端不重置场景。服务端租约拒绝第二个控制者，客户端更换 `resource_id` 不能绕过它。
+引擎采样时间、位置和速度参与会话的到位、过期、取消与超时判定。
+此后端仅提供关节点位、跟随、末端位置和保持；不提供使能、失能、连续路径、定时轨迹或抓稳检测。
+
+### 仿真服务与相机
+
+`manipulation-simulation --plan FILE [--port 9100] [--viewer] [--camera overview]`
+仅接受本地 MuJoCo 设备配置，不执行其中的顺序任务。默认仅监听回环地址。
+`--viewer` 和相机采集需要构建 `MANIPULATION_ENABLE_SIMULATION_RENDERER=ON`，并具备 X11 桌面。
+
+`manipulation-simulation-camera --output DIRECTORY [--camera overview] [--host 127.0.0.1] [--port 9100] [--width 640] [--height 480]`
+使用只读连接，不取得控制权。输出目录必须不存在。
+
+| 输出 | 格式 |
+| --- | --- |
+| `rgb.ppm` | RGB8，左上原点 |
+| `depth.f32` | 行优先、左上原点、little-endian float32；光学轴 Z 深度，单位 m，无效值为 `0` |
+| `metadata.json` | 服务端 `epoch`；`data` 包含宽高、`sample_id`、`sim_time`、相机内参 `K` 和 `T_world_camera` |
+
+`K` 为行优先 3×3 矩阵，像素中心使用整数坐标。
+`T_world_camera` 为行优先 4×4 矩阵，把光学坐标（右、下、前）变换到世界坐标。
+彩色图、深度图、内外参与样本编号来自同一快照；采集不推进物理时间。
+相机的 `sample_id` 为引擎样本编号，设备状态的 `sample_id` 为控制会话反馈编号，不能直接比较。
+服务器重启产生不同 `epoch`；客户端不会自动重连或重放运动。
+
+| 现象 | 处理 |
+| --- | --- |
+| `X11 display unavailable` | 登录桌面并在该会话启动服务；纯远程客户端不需要显示器 |
+| `remote arm stale/regressed feedback` | 检查网络延迟与客户端 `maximum_age_s`，保留服务端本地采样限制 |
+| `real-time scheduling overrun` | 物理步进未能按时运行；减少并行负载，停止后重新创建仿真会话 |
+| `simulation contract mismatch` | 对齐两端的角色、关节顺序、限位、映射及动作参数 |
+
+通信失败不等于物理停止已确认；检查服务端状态后再重新连接，不自动重发失败的运动。
 
 ### 已注册顺序能力
 
@@ -102,7 +181,7 @@ steps: []
 
 | `feedback` | 连接要求 | 移动结果 | 取消或中断 |
 | --- | --- | --- | --- |
-| `position` | 新鲜、完整的位置和状态反馈 | 连续 3 个样本在容差内且静止时 `succeeded` | 驱动确认停止为 `cancelled`，否则 `stop_unknown` |
+| `position` | 新鲜、完整的位置和状态反馈 | 目标下发完毕，连续 3 个样本在容差内且静止时 `succeeded` | 驱动确认停止为 `cancelled`，否则 `stop_unknown` |
 | `none` | 只要求新鲜的在线样本 | 下发后等待 `duration_s`，结果 `unverified` | 始终 `stop_unknown` |
 
 - 所有末端执行器的位置含义相同：`0` 为闭合，`1` 为张开，由驱动转换为设备自身的刻度。
@@ -192,7 +271,9 @@ steps: []
 | `enabled`、`position_mode`、`moving`、`fault` | 机械臂使能、位置模式、实际运动、故障（`true` / `false`） |
 | `latched` | 会话是否已锁定，锁定后须重新连接 |
 | `joints_rad` | 关节位置，按配置顺序 |
+| `joint_reference_verified` | `true` 表示驱动已核对当前关节参考与安装校准一致；`false` 为未校准；未提供验证时为 `null`。不表示手眼外参有效 |
 | `effector_feedback` / `effector_positions` | 末端反馈类型 / 各通道位置（`0` 闭合，`1` 张开）；反馈类型为 `none` 时位置为空数组 |
+| `effector_moving` / `effector_command_active` | 末端实际运动状态 / 驱动是否仍在下发当前目标 |
 | `effector_enabled` | `true`、`false`，驱动无法读回时为 `null` |
 | `effector_loads` | 各通道负载 `[-1,1]`（额定输出的比例，符号为驱动方向），不提供时为空数组 |
 | `effector_holding` | 抓握判断；仅声明 `grasp_detection` 的末端给出 `true` / `false`，其他为 `null` |
@@ -203,17 +284,17 @@ steps: []
 
 - 全局选项 `--site DIR` 写在子命令前，默认为 `$MANIPULATION_SITE` 或 `~/.local/share/spacemit-manipulation/site`。
 - 每台设备一个目录 `SITE/NAME/`，存放 `device.yaml`、姿态和校准文件；`SITE/device.yaml` 是指向当前设备配置的符号链接。
-- 设备类子命令默认使用当前设备，可用 `--plan FILE` 替换。
+- 诊断与单次运动子命令默认使用当前设备，可用 `--plan FILE` 替换；`run` 必须显式提供 `--plan FILE`。
 - 所有命令都不自动使能、清错或归位。
 
 | 子命令 | 参数与说明 |
 | --- | --- |
 | `check` | `--profile build\|control\|vision`；`vision` 另检查 OpenCV、SciPy、`pyrealsense2` |
-| `drivers [--roles]` | 整机注册列表；`--roles` 改为独立角色列表 |
+| `drivers [--roles]` | 只列已启用构建的驱动；默认整机注册列表，`--roles` 改为独立角色列表；`mujoco` 只出现在角色列表 |
 | `configure MODEL` | 生成 `SITE/MODEL/device.yaml` 并设为当前设备；`--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD`；不覆盖已有文件 |
 | `use [NAME]` | 把 `SITE/NAME/device.yaml` 设为当前设备；省略 `NAME` 时只列出已配置的设备，`*` 标记当前设备 |
 | `validate` / `inspect` / `capabilities` | 同 `manipulation-device` 对应子命令 |
-| `run [--enable]` | 执行所选计划中的顺序任务；默认不使能 |
+| `run --plan FILE [--enable]` | 执行指定计划中的顺序任务；默认不使能 |
 | `monitor` | 只读，持续打印关节角（度）、状态、末端位置、负载与抓握判断；`--rate HZ`（1–20，默认 5）、`--count N` |
 | `enable` / `disable`、`hand-enable` / `hand-disable` | 使能 / 释放扭矩；失能前须支撑机械臂并取下所持物品 |
 | `hold` / `hand-hold` | 保持当前位置，不释放扭矩 |
@@ -262,7 +343,9 @@ JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`
 共享会话包含 `manifest.json`、样本和绑定的设备、模型、相机、标定板及坐标系身份。
 采集未完成、身份混用或依赖文件变化会被拒绝。旧 `dataset.json` 及旧 Dice 会话继续按原格式读取。
 跨应用导出要求显式安装标识、匹配的相机类型和 `color_optical` 坐标系、通过质量门限的结果。
+`--installation-id` 必须与结果绑定的 `installation_id` 相同；自动生成的会话编号不能替代显式确认的安装标识。安装变化后重新标定。
 `export-perceptive` 写入 `calibration.<camera_type>.T_base_camera`：`translation` 为 m，`rotation` 为 XYZ RPY rad，方向为相机到机械臂基座，不修改应用配置。
+命令读取会话内已 `promote` 的 `active.json`，输出文件必须不存在。
 
 ### so101-calibrate
 
@@ -298,7 +381,7 @@ JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`
 | `unverified` | 无反馈末端：已下发并等完执行时间，位置未测量 | 可继续 |
 
 - **锁定**：锁定后拒绝新的运动和使能，直到断开并重新连接。重连只读取实际状态，不重放目标、不归位、不使能。
-- **写入前拒绝**：写入设备前就被拒绝的请求（如前置条件不满足）不改变状态、不锁定，C++ 中抛出 `CommandRejected`。
+- **写入前拒绝**：`CommandRejected` 表示请求在写入设备前被拒绝，不改变状态、不锁定。其子类 `BusyRejected` 表示末端仍在运动或执行命令；调用方可等待新的静止反馈后有限重试。其他异常或已提交命令的失败不能按此规则重试。
 - **软件保持**：Ctrl+C 和停止信号请求软件保持。Nero 以不高于当前命令的速度回到停止时刻的位置，可能先越过再小幅回退。这不是急停。
 - **抓稳证据**：`physical_grip_verified` 只在末端按抓握判断结束（`detail` 为 `effector_grasp_holding`）时为 `true`。
 
@@ -320,7 +403,7 @@ JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`
 
 | 头文件 | 内容 |
 | --- | --- |
-| `types.h` | `DeviceConfig`、`Result`、`CommandResult`、`CommandRejected` |
+| `types.h` | `DeviceConfig`、`Result`、`CommandResult`、`CommandRejected`、`BusyRejected` |
 | `arm.h` | 驱动接口 `Arm`、`ArmState`、`JointPoint`、`JointPath`、`JointTrajectory` |
 | `device.h` | 驱动接口 `EndEffector`、注册表 `DeviceRegistry`、会话 `DeviceSession` |
 | `device_plan.h` | `LoadDevicePlan`、`RunDeviceSteps` |
@@ -369,7 +452,7 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `move_arm_trajectory(times_s, positions_rad, command_rate_hz=100, max_step_rad=0.0174533, speed_scale=1.0, tolerance_rad=0, wait_for_arrival=True, effector_schedule=(), allow_unverified=False)` | 定时轨迹 |
 | `follow_arm(target_rad, speed_scale)` | 关节目标跟随，发出目标即返回 |
 | `move_effector(positions, duration_s=0.5, allow_unverified=False)` | 末端各通道移到绝对位置（`0` 闭合，`1` 张开） |
-| `execute_capability(name, parameters=None, allow_unverified=False)` | 调用已注册能力；`parameters` 为该能力的字段字典，不能覆盖 `capability`；沿用取消、期限与运动授权 |
+| `execute_capability(name, parameters=None, *, allow_unverified=False)` | 调用已注册能力；`parameters` 为该能力的字段字典，不能覆盖 `capability`；沿用取消、期限与运动授权 |
 | `follow_effector(positions, duration_s=0.1, allow_unverified=False)` | 末端目标跟随，发出目标即返回 |
 | `close()` | 关闭会话；也可使用 `with` |
 
@@ -404,6 +487,26 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
   - 末端动作期间，收尾中的机械臂只能向上一条命令的目标收拢，其余偏离超过 1° 判为故障。
 
 ## 7. 运动学
+
+### C++ 接口
+
+头文件 `manipulation/kinematics.h`，链接目标 `spacemit::manipulation_kinematics`。
+启用 `MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO` 后，内置注册表提供 `pinocchio` 后端；默认关闭。
+
+| 接口 | 含义 |
+| --- | --- |
+| `KinematicsConfig` | URDF 路径、基座、末端及从基座到末端的关节顺序；支持有界旋转关节链，顺序须与设备一致 |
+| `Forward(joints_rad)` | 返回基座下末端位姿，单位米，四元数顺序 `qw,qx,qy,qz`；允许读取限位外的实际姿态 |
+| `Inverse(target, seed, options)` | 有限时逆解；解在 URDF 限位内，无解返回 `nullopt`，非法输入抛出异常 |
+| `JointNames()` / `LowerLimits()` / `UpperLimits()` | 配置顺序的关节名和限位 |
+| `KinematicsRegistry::Register(id, factory)` | 注册求解器，不修改设备接口或具体设备驱动 |
+| `MakeBuiltinKinematicsRegistry().Create(id, config)` | 创建已启用的求解器，不连接设备 |
+
+`InverseOptions` 默认时限 `0.1 s`、迭代上限 `1000`、加权误差阈值 `1e-4`。
+`position_weight` 在 `[0,1]` 内：`1` 只求位置，`0` 只求方向，其他值对位置和方向按互补权重求解。
+求解结果不是碰撞规划；应用仍需检查工作空间、设备限位与完整路径。
+
+### Python 接口
 
 `spacemit_manipulation.urdf_fk.UrdfKinematics(urdf, base, tip, joints)` 读取 URDF 关节链（参数取自机型的 `model.json`），不访问设备：
 

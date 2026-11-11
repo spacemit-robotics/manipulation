@@ -1,0 +1,41 @@
+<mujoco model="mapping_contract">
+  <compiler angle="radian" autolimits="true"/>
+  <option timestep="0.002" gravity="0 0 0"/>
+  <default>
+    <joint damping="2"/>
+    <geom type="sphere" size="0.04" mass="1" contype="0" conaffinity="0"/>
+  </default>
+  <worldbody>
+    <body name="free_object" pos="0 0 1">
+      <freejoint name="object_free"/>
+      <geom/>
+    </body>
+    <body name="passive_link" pos="0 1 0">
+      <joint name="passive_joint" type="hinge" axis="0 0 1"/>
+      <geom pos="0.1 0 0"/>
+    </body>
+    <body name="first_link">
+      <joint name="first_joint" type="hinge" axis="0 0 1" range="-1 1"/>
+      <geom pos="0.1 0 0"/>
+    </body>
+    <body name="second_link" pos="0.5 0 0">
+      <joint name="second_joint" type="hinge" axis="0 0 1" range="-1 1"/>
+      <geom pos="0.1 0 0"/>
+    </body>
+    <body name="finger" pos="0 0.5 0">
+      <joint name="finger_joint" type="slide" axis="1 0 0" range="0 1"/>
+      <geom/>
+    </body>
+  </worldbody>
+  <tendon>
+    <fixed name="finger_tendon"><joint joint="finger_joint" coef="1"/></fixed>
+  </tendon>
+  <actuator>
+    <position name="first_servo" joint="first_joint" kp="80" kv="8" ctrlrange="-1 1"/>
+    <position name="second_servo" joint="second_joint" kp="80" kv="8" ctrlrange="-1 1"/>
+    <position name="finger_servo" tendon="finger_tendon" kp="80" kv="16" ctrlrange="0 1"/>
+  </actuator>
+  <keyframe>
+    <key name="start" qpos="0 0 1 1 0 0 0 0 0 0 0.5" ctrl="0 0 0.5"/>
+  </keyframe>
+</mujoco>

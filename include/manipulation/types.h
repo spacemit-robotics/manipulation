@@ -98,6 +98,18 @@ public:
 };
 
 /**
+ * @brief A busy-state check refused a command before any device write.
+ *
+ * Callers may recheck device health, wait for fresh idle feedback and retry within a bounded
+ * deadline. Remaining preconditions may still fail. Faults, disabled state, stale feedback and
+ * failures after submission are not classified as busy.
+ */
+class BusyRejected : public CommandRejected {
+public:
+    using CommandRejected::CommandRejected;
+};
+
+/**
  * @brief Check an arm configuration offline.
  *
  * @param config Arm configuration.

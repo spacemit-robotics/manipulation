@@ -5,7 +5,7 @@
 ## 1. 分层
 
 ```text
-应用（application/native/*）            业务状态机、视觉、现场配置
+应用（application/native/*、ros2/*）     业务状态机、视觉、现场配置
     │ C++ DeviceSession 或 Python DeviceClient
     ▼
 能力与工具（capabilities/、runtime/）     点位任务、诊断、标定、配置解析、命令行
@@ -29,8 +29,10 @@
 | `core/` | `DeviceSession`、内部 `ArmSession`、设备独占、到位与故障判定 |
 | `runtime/` | 解析 `device.yaml`，经注册表创建设备 |
 | `drivers/<类别>/<型号>/` | 驱动实现与注册；`drivers/common/` 放共享连接 |
+| `drivers/simulation/mujoco/` | MuJoCo 机械臂与末端适配，共用一个物理世界 |
 | `capabilities/<能力>/` | 可复用实现及其命令行入口 |
 | `descriptions/robots/<型号>/` | 配置模板、URDF、`model.json`、限位来源与许可 |
+| `descriptions/simulation/<场景>/` | MJCF 场景、关节与执行器映射、资源清单及模型许可 |
 | `bindings/python/` | Python 客户端与命令行公共逻辑 |
 
 ## 2. 术语
@@ -64,6 +66,7 @@
 - 位置统一为 `0` 闭合、`1` 张开，驱动负责转换为设备自身的刻度；上层命令和应用不感知具体设备。
 - `feedback: none` 时 `Read` 只返回在线样本（`positions` 为空），不得用命令值冒充位置；会话据此开环执行，结果为 `unverified`。
 - `EffectorState::enabled` 未知时保留 `std::nullopt`；声明 `enable` / `disable` 能力的驱动必须能读回扭矩状态。
+- 驱动仍在分段下发目标时，`EffectorState::command_active` 为真；它与实际运动标志 `moving` 分开报告。到位或持物完成须等待下发结束，`Hold` 须先终止后续下发。
 - `EffectorState::loads` 可报告各通道负载（`[-1,1]`），不支持时留空。
 - 声明 `grasp_detection` 的驱动在 `EffectorState::holding` 报告抓握判断：闭合目标未到达、已停止且有负载证据时为真。
   会话把连续三个这样的样本视为抓取成功（`effector_grasp_holding`）；`Hold` 不得为此改写闭合目标而松开物体。
@@ -100,6 +103,12 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 - 应答中标明请求是否在写入设备前被拒绝（`rejected`），以区分可以继续的拒绝和需要锁定的失败。
 
 ## 4. 新增驱动
+
+运动学不放入设备驱动。应用通过 `manipulation/kinematics.h` 创建独立求解器，
+设备与模型使用完全相同的关节顺序。新增算法实现 `Kinematics`，通过
+`KinematicsRegistry::Register` 注册工厂；未注册的名称明确报错，不回退到其他算法。
+Linksee `perceptive_grasp` 的真机执行器使用该接口，标定采集复用公共 `FeedbackPort`、
+`capture_sample` 和 `CalibrationSession`；相机采集及业务策略仍由应用提供。
 
 1. 在 `drivers/arms/<型号>/` 实现接口和注册函数：
 
@@ -140,6 +149,30 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 
 `examples/bench_driver/` 是可直接构建的单轴示例。
 其中 `composed.yaml` 把扩展机械臂与内置 Mock 末端组合，`bench.yaml` 使用整机配置。
+
+### 仿真模型接入
+
+`drivers/simulation/mujoco/` 实现统一 `Arm` 和 `EndEffector` 接口；
+物理步进由 `components/simulation/mujoco` 的 `World` 提供。公共控制层不依赖 MuJoCo 类型。
+
+接入符合位置控制约定的其他机械臂或末端时：
+
+1. 在 `descriptions/simulation/<场景>/` 放置 MJCF、资源清单与模型许可。
+2. 提供 `mapping.yaml`，按名称映射关节和执行器；末端明确闭合、张开的控制值与反馈端点。
+3. 在设备配置中分别选择 `mujoco` 角色。共用一个世界时，使用相同的 `resource_id` 和映射文件。
+4. 在 `examples/simulation/` 提供点位任务，检查实际反馈、停止、越界拒绝与超时。
+
+这类模型接入不新增驱动名称或公共 API。需要力矩控制、复杂手部传动或新物理引擎时，
+实现对应后端并注册，不通过放宽映射校验伪装成已支持。
+MJCF 不替代运动学与手眼标定所需的 URDF 和 `model.json`。
+
+需要共享窗口、相机和控制时，由 `MujocoRuntime` 持有世界，通过 `CreateDevices()` 交给 `DeviceSession`。
+`Snapshot()` 供渲染和规划读取；规划只修改复制的数据，不直接写物理世界。
+动态接触约束属于场景操作，不能作为通用设备 API 的抓稳结果；`AttachWeld()` 会在世界锁内重新检查双侧接触。
+
+远程后端实现相同私有会话接口，服务端复用本地驱动。图像请求使用独立只读连接，不取得控制租约。
+控制超时、断连和租约失效会停止参考更新并请求保持；通信失败不能证明物理停止。
+服务端时钟不与客户端绝对时间混用，命令序号和采样编号共同防止旧反馈被当作完成证据。
 
 ## 5. 新增能力与工具
 
@@ -189,7 +222,8 @@ build-capability/manipulation-device run examples/capability_probe/device.yaml
 
 公共模块提供采样、会话记录、求解、评估和格式导出；应用保留自动运动路线、桌面登记和业务批准流程。
 Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样路线仍由应用管理。
-`perceptive_grasp` 可使用公共 CLI 采集并导出其 `T_base_camera` 配置，原有执行器不变。
+`perceptive_grasp` 的真机执行器使用公共 `DeviceSession` 和运动学接口，标定采集使用只读 `DeviceClient` 与公共采样模块。
+公共 CLI 也可采集并导出它的 `T_base_camera` 配置；导出仅新建外参片段，不切换应用控制后端。
 
 | 模块 | 接口 |
 | --- | --- |
@@ -199,6 +233,8 @@ Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样�
 
 配置指定设备计划、关节模型、相机采样模块和安装标识。记录包含设备与模型摘要、关节顺序、相机序列号、内参、标定板几何及坐标系。
 同一会话不能混用身份或未完成的样本；跨应用导出要求明确安装标识和通过质量阈值的结果。
+`export-perceptive` 要求导出标识与采集时显式确认的 `installation_id` 相同，相机类型匹配且使用 `color_optical` 坐标系。
+固定安装改变后重新标定，不改写标识复用旧结果。可执行流程见 [README 手眼标定](../README.md#6-手眼标定)。
 
 手眼标定的相机采样是可替换模块（`--sampler`），提供 `create_sampler(options)`，返回的对象实现：
 

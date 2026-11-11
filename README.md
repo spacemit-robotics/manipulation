@@ -7,6 +7,7 @@
 | `mock_device` | 软件模拟 | 无需硬件 |
 | `agx_nero_revo2` | 松灵 Nero 七轴，可选 Revo2 右手 | 点位、连续路径、定时轨迹；Revo2 无位置反馈 |
 | `so101` | SO101 五轴，可选原配夹爪 | 点位、使能与失能；夹爪按负载判断是否夹住；附舵机校准工具 |
+| `mujoco` | 物理仿真，附 UR5e + Robotiq 2F85 配置 | 关节点位、末端位置反馈与保持；按需构建 |
 
 组件不自动使能、清错、归位或重试。设备独占、到位判定、取消、超时和故障锁定由设备会话统一处理。
 
@@ -33,6 +34,16 @@ mm --with-deps
 
 - 组件安装到 `output/staging`，缺少系统依赖时按提示安装；新终端须重新执行 `source build/envsetup.sh`。
 - 构建选项 `MANIPULATION_ENABLE_NERO`、`MANIPULATION_ENABLE_SO101` 默认开启；检测到 OpenCV 时同时构建标定求解器（`MANIPULATION_ENABLE_CALIBRATION`）。
+- C++ 正逆运动学按需启用：安装 Pinocchio 后执行 `mm -DMANIPULATION_ENABLE_KINEMATICS_PINOCCHIO=ON`。Python 运动学不需要 Pinocchio。
+
+安装后分别查看整机和独立角色驱动，不连接硬件：
+
+```bash
+manipulation drivers
+manipulation drivers --roles
+```
+
+列表只包含已启用构建的驱动。`mock_device` 是整机驱动，`mock` 是角色驱动；`mujoco` 只注册角色，启用对应构建选项后才出现在 `--roles` 列表中。
 
 ## 2. 运行 Mock
 
@@ -48,11 +59,11 @@ manipulation demo
 
 | 角色 | 已注册驱动 |
 | --- | --- |
-| 机械臂 | `mock`、`nero`、`so101` |
-| 末端执行器 | `mock`、`revo2`、`so101_gripper` |
+| 机械臂 | `mock`、`nero`、`so101`、`mujoco`（按需构建） |
+| 末端执行器 | `mock`、`revo2`、`so101_gripper`、`mujoco`（按需构建） |
 
 不同连接分别填写 `resource_id`；共用连接时使用相同标识，且该驱动对须注册共享连接工厂。
-Nero / Revo2、SO101 / 原配夹爪已提供共享连接。软件组合不代表机械安装、电气连接或应用动作兼容。
+Nero / Revo2、SO101 / 原配夹爪和 MuJoCo 仿真角色已提供共享连接。软件组合不代表机械安装、电气连接或应用动作兼容。
 
 在组件目录运行独立组合示例，无需硬件：
 
@@ -80,6 +91,65 @@ manipulation run --plan examples/capability_sequence.yaml
 
 该示例使用 Mock。真机的可用能力以 `manipulation capabilities` 的 `registered` 列表为准；配置不能补充驱动缺少的能力。
 
+### UR5e / MuJoCo 物理仿真
+
+在 SDK 根目录执行，不需要机械臂或显示器：
+
+```bash
+source build/envsetup.sh
+cd components/control/manipulation
+python3 tools/prepare_simulation_assets.py
+mm -DMANIPULATION_ENABLE_MUJOCO=ON
+manipulation run --plan examples/simulation/ur5e_robotiq.yaml
+```
+
+示例执行六轴机械臂点位和 Robotiq 2F85 夹爪开合；仅机械臂使用 `examples/simulation/ur5e_arm.yaml`。
+模型网格按固定版本下载并校验，MuJoCo 库由构建系统获取。`MANIPULATION_ENABLE_MUJOCO` 默认关闭。
+
+- 机械臂与末端分别选择 `mujoco` 驱动；相同 `resource_id` 和 `mapping_file` 共用一个物理世界。
+- 每次设备会话创建独立仿真，从模型初始状态开始；连续交互使用同一个 `DeviceClient`，不同命令行进程不保留上次仿真状态。
+- 反馈取自物理引擎中的关节位置和速度，不使用目标值代替。夹爪到位不表示已抓稳物体。
+- 连续路径和定时轨迹尚不支持。
+
+需要窗口、模拟相机或跨机控制时，安装图形依赖并构建仿真服务：
+
+```bash
+sudo apt install -y git ca-certificates libglfw3-dev libgl1-mesa-dev libx11-dev
+mm -DMANIPULATION_ENABLE_MUJOCO=ON -DMANIPULATION_ENABLE_SIMULATION_RENDERER=ON
+manipulation-simulation --plan examples/simulation/ur5e_robotiq.yaml --viewer
+```
+
+服务保持一个物理世界，窗口与相机只读取它，不执行配置中的 `steps`。在第二个已加载 SDK 环境的终端、同一组件目录执行：
+
+```bash
+manipulation run --plan examples/simulation/ur5e_robotiq_remote.yaml
+manipulation-simulation-camera --camera overview --output camera_frame
+```
+
+`camera_frame/` 保存彩色图 `rgb.ppm`、米制深度 `depth.f32` 和相机参数 `metadata.json`；已有目录不覆盖。
+窗口和模拟相机需要 X11 桌面，隐藏相机窗口也需要显示服务。省略 `--viewer` 可只提供控制服务。
+
+服务仅监听 `127.0.0.1:9100`。K3 连接 PC 时，在 K3 保持 SSH 转发运行，再使用同一远程配置：
+
+```bash
+read -rp "PC SSH 地址（用户@主机）: " SIM_PC
+ssh -N -L 9100:127.0.0.1:9100 "$SIM_PC"
+```
+
+仅构建远程客户端时执行以下命令，不需要本机 MuJoCo 或图形库：
+
+```bash
+mm -DMANIPULATION_ENABLE_MUJOCO_REMOTE=ON \
+  -DMANIPULATION_ENABLE_MUJOCO=OFF -DMANIPULATION_ENABLE_SIMULATION_RENDERER=OFF
+```
+
+远端世界只接受一个控制连接；连接断开或租约到期时请求保持，重新连接不恢复旧动作。
+远程示例的反馈时限为 `1.0` 秒，包含网络往返耗时；服务端本地采样时限独立生效。
+
+完整视觉抓取示例位于 `application/ros2/linksee/perceptive_grasp`，使用 UR5e、Robotiq 2F85、模拟 RGB-D 和桌面物体场景。
+
+其他模型通过 MJCF 场景和关节、执行器映射接入，不需要新增型号分支。映射字段见[接口参考](docs/reference.md#仿真映射)。
+
 ## 3. 现场目录与当前设备
 
 真机配置保存在现场目录 `SITE`（默认 `~/.local/share/spacemit-manipulation/site/`）。每台设备一个子目录，存放该设备的配置、姿态和校准文件：
@@ -93,14 +163,14 @@ SITE/
 └── device.yaml -> nero/device.yaml    # 当前设备
 ```
 
-`configure` 生成配置后，把该设备设为当前设备；其他命令默认控制当前设备，无需重复指定。
+`configure` 生成配置后，把该设备设为当前设备；`inspect`、`monitor` 和单次运动命令默认控制当前设备，无需重复指定。
 
 ```bash
 manipulation use          # 列出已配置的设备，* 标记当前设备
 manipulation use so101    # 切换当前设备
 ```
 
-单条命令可用 `--plan FILE` 改用其他配置。
+单条命令可用 `--plan FILE` 改用其他配置；顺序任务 `manipulation run` 必须显式提供 `--plan FILE`。
 
 ## 4. 连接 Nero
 
@@ -213,11 +283,13 @@ hand-eye export cal_01
 采集、求解与评估不依赖应用。相同流程可用于 Dice Arena 和 `perceptive_grasp`；后者的外参配置片段由以下命令生成：
 
 ```bash
-hand-eye export-perceptive cal_01 --installation-id workcell-01 --output perceptive_calibration.yaml
+hand-eye export-perceptive cal_01 --installation-id workcell-01 \
+  --camera-type realsense --output perceptive_calibration.yaml
 ```
 
-把生成的 `calibration.realsense.T_base_camera` 合入抓取配置。它只更新外参，不迁移抓取控制路径。
-`workcell-01` 标识固定的机械臂、相机安装；更换基座、相机位置或安装后须重新标定，不能仅沿用标识复用旧结果。
+把生成的 `calibration.realsense.T_base_camera` 合入抓取配置；平移单位为 m，旋转为 XYZ RPY rad。导出只新建外参片段，不自动修改应用配置或切换控制后端。
+`--installation-id` 必须与采集时显式确认的标识相同；相机类型须匹配，坐标系须为 `color_optical`，结果须通过质量检查并已 `promote`。
+`workcell-01` 标识固定的机械臂、相机安装；更换基座、相机位置或安装后须重新标定，不能改写标识复用旧结果。输出文件不覆盖。
 
 ## 7. 在程序中使用
 
@@ -286,7 +358,8 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 无需修改公共头文件或已有驱动。驱动约定见[开发指南](docs/development.md)。
 
 新增顺序能力时，在模块中注册参数解析、支持条件、参数校验和执行函数，使用 `manipulation_register_capability` 纳入构建。
-示例位于 `examples/capability_probe/`；无需修改任务解析器或执行分支。
+树外能力模块通过 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定，多个目录用分号分隔。
+示例位于 `examples/capability_probe/`；无需修改任务解析器或执行分支，构建步骤见[开发指南](docs/development.md#注册顺序能力)。
 
 ## 9. 使用限制
 
@@ -296,6 +369,8 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 - **无反馈末端执行器**：开环执行；取消或中断后结果为 `stop_unknown`，须现场检查后重新连接。
 - **碰撞检测**：不提供；`pose-move`、`line-move` 只检查关节限位。
 - **机械臂数量**：只支持单臂。
+
+**验收范围（截至 2026-11-11）**：K3 隔离环境的公共控制回归 19/19、公共仿真回归 22/22 通过，模拟 RGB-D 和应用仿真抓取已验证。实体 SO101 抓取、现场相机采集及 K3 实际桌面/GPU 显示尚未验收；验证未修改 K3 正式安装目录。
 
 ## 目录结构
 
@@ -314,14 +389,19 @@ manipulation/
 │   ├── common/             # 共享连接
 │   │   ├── agx_session/    # Nero 与 Revo2 共享会话
 │   │   └── so101_session/  # SO101 机械臂与夹爪共享串口总线
+│   ├── simulation/         # 仿真设备驱动
+│   │   └── mujoco/         # 共享物理世界与关节、末端映射
 │   └── mock/               # 无硬件模拟设备
 ├── capabilities/           # 公共能力与命令行工具
 │   ├── motion/             # 运动控制与 manipulation-device
 │   ├── diagnostics/        # 设备检查与 manipulation 操作命令
 │   ├── kinematics/         # 正逆运动学
-│   └── calibration/        # 姿态采集与手眼标定
+│   ├── calibration/        # 姿态采集与手眼标定
+│   └── simulation/         # 仿真服务、可视化与远程相机工具
 ├── bindings/python/        # Python 客户端 DeviceClient
-├── descriptions/robots/    # 机型描述：URDF、model.json、配置模板
+├── descriptions/           # 模型与配置
+│   ├── robots/             # 机型描述：URDF、model.json、配置模板
+│   └── simulation/         # 仿真场景、关节与执行器映射
 ├── examples/               # Mock 配置、C++ 接入、驱动与能力扩展
 ├── tools/                  # 辅助脚本
 ├── tests/                  # 测试

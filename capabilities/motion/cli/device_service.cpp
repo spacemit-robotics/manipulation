@@ -123,6 +123,9 @@ std::string DeviceStateJson(m::DeviceSession& session) {
             ",\"firmware\":" + Quote(arm.firmware) +
             ",\"arm_sample_id\":" + std::to_string(arm.sample_id) +
             ",\"source_time_s\":" + std::to_string(arm.source_time_s);
+    data += ",\"joint_reference_verified\":" +
+            std::string(arm.joint_reference_verified.has_value() ?
+                            (*arm.joint_reference_verified ? "true" : "false") : "null");
     if (!arm.controller_limits.empty())
         data += ",\"controller_limits\":" + Limits(arm.controller_limits);
     if (session.HasEffector()) {
@@ -131,6 +134,8 @@ std::string DeviceStateJson(m::DeviceSession& session) {
                 session.Definition().effector.feedback == m::EffectorFeedback::kPosition;
         data += ",\"effector_feedback\":" + Quote(measured ? "position" : "none") +
                 ",\"effector_positions\":" + Values(tool.positions) +
+                ",\"effector_moving\":" + (tool.moving ? "true" : "false") +
+                ",\"effector_command_active\":" + (tool.command_active ? "true" : "false") +
                 ",\"effector_fault\":" + (tool.fault ? "true" : "false") +
                 ",\"effector_enabled\":" +
                 (tool.enabled.has_value() ? (*tool.enabled ? "true" : "false") : "null") +

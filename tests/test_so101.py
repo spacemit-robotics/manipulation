@@ -188,6 +188,7 @@ class So101Tests(unittest.TestCase):
             self.assertAlmostEqual(state["joints_rad"][0], 2048 * 2 * math.pi / 4095 - math.pi)
             self.assertAlmostEqual(state["effector_positions"][0], (2750 - 2031) / 1437)
             self.assertTrue(state["effector_enabled"])
+            self.assertIs(state["joint_reference_verified"], True)
         self.assertTrue(self.bus.requests)
         self.assertTrue(all(instruction == 2 for _, instruction, _ in self.bus.requests))
         self.assertEqual(self.bus.writes, [])
@@ -197,6 +198,7 @@ class So101Tests(unittest.TestCase):
         self.save()
         with self.client() as client:
             self.assertEqual(len(client.state()["joints_rad"]), 5)
+            self.assertIs(client.state()["joint_reference_verified"], False)
             with self.assertRaises(DeviceCommandError):
                 client.move_arm([0.1] * 5, 0.1)
             with self.assertRaises(DeviceCommandError):

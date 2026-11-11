@@ -19,8 +19,20 @@ class FeedbackPort:
         deadline = time.monotonic() + 0.5
         while time.monotonic() < deadline:
             state = self.client.state(timeout=0.5)
-            if state["moving"] or state["fault"]:
+            if any(
+                state.get(field, False)
+                for field in (
+                    "moving", "fault", "latched", "effector_moving",
+                    "effector_command_active", "effector_fault",
+                )
+            ):
                 raise RuntimeError("arm must remain stationary and healthy during calibration")
+            joints = state["joints_rad"]
+            if not joints or any(not math.isfinite(value) for value in joints):
+                raise RuntimeError("invalid joint feedback for calibration")
+            names = getattr(self.model, "names", None)
+            if isinstance(names, (list, tuple)) and len(joints) != len(names):
+                raise RuntimeError("joint feedback disagrees with calibration model")
             if state["arm_sample_id"] > self.last:
                 self.last = state["arm_sample_id"]
                 return dict(

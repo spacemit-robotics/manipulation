@@ -81,6 +81,7 @@ public:
         state.source_time_s =
                 std::chrono::duration<double>(state.received_at.time_since_epoch()).count();
         state.valid = true;
+        state.joint_reference_verified = settings.arm_calibrated;
         if (std::chrono::duration<double>(Clock::now() - state.received_at).count() >
                 definition_.maximum_age_s) {
             throw std::runtime_error("SO101 complete arm feedback exceeded maximum_age_s");

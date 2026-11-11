@@ -70,6 +70,8 @@ struct EffectorState {
     /// Grasp evidence from a driver with grasp_detection: stopped short of a closing target under
     /// load. Empty for other drivers.
     std::optional<bool> holding = std::nullopt;
+    /// The driver is still dispatching the accepted target, even if measured velocity is zero.
+    bool command_active = false;
 };
 
 /// End-effector target.

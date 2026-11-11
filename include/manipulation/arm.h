@@ -9,6 +9,7 @@
 #ifndef ARM_H
 #define ARM_H
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,8 @@ struct ArmState {
     std::vector<ControllerJointLimit> controller_limits;
     /// The driver is still delivering the last command, for example while streaming.
     bool command_active = false;
+    /// Joint reference matches installed calibration; unknown when not checked by the driver.
+    std::optional<bool> joint_reference_verified;
 };
 
 /**

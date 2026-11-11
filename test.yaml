@@ -18,3 +18,16 @@ tests:
     workdir: sdk
     command: |
       bash components/control/manipulation/tools/verify_stack.sh "$PWD/output/test/manipulation-stack"
+  - name: manipulation-mujoco-physics
+    description: Headless physics, UR5e/Robotiq assets, registered simulation drivers and relocation.
+    category: functional
+    scopes: [scheduled, release]
+    timeout_s: 900
+    workdir: sdk
+    command: |
+      python3 components/control/manipulation/tools/prepare_simulation_assets.py
+      cmake -S components/control/manipulation -B output/test/manipulation-mujoco -DCMAKE_BUILD_TYPE=Release -DMANIPULATION_ENABLE_MUJOCO=ON -DMANIPULATION_ENABLE_NERO=OFF -DMANIPULATION_ENABLE_SO101=OFF -DMANIPULATION_ENABLE_CALIBRATION=OFF -DCMAKE_INSTALL_PREFIX="$PWD/output/test/manipulation-mujoco/install"
+      cmake --build output/test/manipulation-mujoco -j2
+      ctest --test-dir output/test/manipulation-mujoco --output-on-failure
+      cmake --install output/test/manipulation-mujoco
+      python3 components/control/manipulation/tests/check_simulation_install.py output/test/manipulation-mujoco/install
