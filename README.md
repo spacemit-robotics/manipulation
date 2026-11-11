@@ -13,13 +13,19 @@
 
 ## 系统架构
 
-![manipulation 系统架构](docs/assets/architecture.svg)
+![manipulation 组件架构：调用入口、配置与设备会话、角色驱动、运行后端及公共能力](docs/assets/architecture.svg)
 
-- **调用方**：C++ 应用链接组件库，在进程内使用 `DeviceSession`；命令行和 Python 应用使用 `DeviceClient`，它启动本机进程 `manipulation-device serve` 并经 JSONL 下发请求；YAML 点位任务由 `manipulation-device run` 执行。
-- **设备会话**：`core/` 的 `DeviceSession` 统一处理设备独占、到位判定、取消、超时和故障锁定，执行点位、连续路径、定时轨迹、目标跟随和末端执行器动作。
-- **驱动**：`runtime/` 经注册表装配设备，可独立选择机械臂与末端驱动，也支持整机 `device.driver` 配置。驱动负责型号协议和单位转换；同一物理连接由共享连接工厂装配。
-- **设备**：Nero 驱动经独立 worker 进程调用厂商 SDK pyAgxArm，SO101 驱动经 `motor` 组件访问舵机总线。
-- **能力与工具**：运动学和手眼标定从 `device.yaml` 与 `descriptions/` 取得关节和模型，不写死型号；`so101-calibrate` 直接读写舵机寄存器，用于舵机校准。
+组件通过 `DeviceSession` 统一设备控制，角色驱动分别对接真机、Mock 接口模拟或 MuJoCo 物理仿真。
+
+| 模块 | 职责与调用关系 |
+| --- | --- |
+| 调用入口 | C++ 控制程序在进程内使用 `DeviceSession`；Python `DeviceClient` 和交互控制命令经本机 `manipulation-device serve`，以 JSONL 通信。 |
+| 配置与任务 | `runtime/` 解析设备配置并调度 YAML `steps`；`run`、`validate`、`inspect` 等命令直接调用 `manipulation-device`。 |
+| 设备会话 | `DeviceSession` 负责设备独占、动作执行、到位判定，以及取消、超时和故障锁定。 |
+| 角色装配 | 注册表装配 `Arm` 和可选 `EndEffector`，支持独立角色驱动、整机配置和显式共享连接。 |
+| 物理仿真 | MuJoCo 角色驱动在本地访问物理世界，或经 TCP 连接 `manipulation-simulation`；服务通过 `MujocoRuntime` 持有世界。 |
+| 图像输出 | `simulation/mujoco/` 提供 `World` 与快照；`Viewer` 和 `Renderer` 只读快照，输出窗口与 RGB-D，不推进物理世界或取得控制权。 |
+| 公共能力 | 运动学与手眼求解通过独立接口调用；标定采集通过只读设备接口获取反馈。模型、限位和映射来自配置与 `descriptions/`。 |
 
 ## 1. 安装
 

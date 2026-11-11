@@ -4,24 +4,13 @@
 
 ## 1. 分层
 
-```text
-应用（application/native/*、ros2/*）     业务状态机、视觉、现场配置
-    │ C++ DeviceSession 或 Python DeviceClient
-    ▼
-能力与工具（capabilities/、runtime/）     点位任务、诊断、标定、配置解析、命令行
-    │ 只依赖公共接口
-    ▼
-公共接口与会话（include/、core/）         Arm / EndEffector 接口、注册表、独占、结果判定
-    ▲ 实现接口并注册
-    │
-驱动（drivers/）                          型号协议、单位转换、厂商 SDK
-    │
-设备 / 厂商 SDK / 仿真
-```
+![manipulation 组件架构：调用入口、配置与设备会话、角色驱动、运行后端及公共能力](assets/architecture.svg)
 
-- 依赖只能向下。
-- core 和 runtime 不出现型号名；工具通过 `device.yaml` 和 `describe` 获取关节与通道信息。
-- 型号相关的配置模板和 URDF 放在 `descriptions/robots/<型号>/`。
+控制入口、配置运行时和设备会话通过公共接口访问角色驱动。驱动实现 `Arm` 或 `EndEffector`，并注册独立角色、整机或共享连接工厂；公共控制层不依赖具体型号或 MuJoCo 类型。
+
+MuJoCo 角色驱动连接本地物理世界，或经 TCP 使用常驻仿真服务。`Viewer`、`Renderer` 读取世界快照；运动学与手眼求解是独立计算能力，不是控制命令的必经层。
+
+工具通过 `device.yaml` 和 `describe` 获取关节与通道信息；型号模板和 URDF 位于 `descriptions/robots/<型号>/`。架构图的统一图源与导出方法见[架构图维护](diagrams/README.md)。
 
 | 目录 | 职责 |
 | --- | --- |
@@ -49,7 +38,7 @@
 
 ## 3. 驱动约定
 
-驱动实现 `Arm`，有末端时实现 `EndEffector`，由会话串行调用。
+机械臂驱动实现 `Arm`，末端驱动实现 `EndEffector`，由会话串行调用。
 
 | 方法 | 要求 |
 | --- | --- |
