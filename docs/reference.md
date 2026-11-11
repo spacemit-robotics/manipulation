@@ -331,13 +331,14 @@ steps: []
 - 全局选项 `--site DIR` 写在子命令前，默认为 `$MANIPULATION_SITE` 或 `~/.local/share/spacemit-manipulation/site`。
 - 每台设备一个目录 `SITE/NAME/`，存放 `device.yaml`、姿态和校准文件；`SITE/device.yaml` 是指向当前设备配置的符号链接。
 - 诊断与单次运动子命令默认使用当前设备，可用 `--plan FILE` 替换；`run` 必须显式提供 `--plan FILE`。
+- `configure` 复用已有配置时先离线校验并核对型号，保留文件内容后选中；失败时保持原选择。`--variant`、`--set` 和 `--python` 只用于生成新文件。
 - 所有命令都不自动使能、清错或归位。
 
 | 子命令 | 参数与说明 |
 | --- | --- |
 | `check` | `--profile build\|control\|vision`；`vision` 另检查 OpenCV、SciPy、`pyrealsense2` |
 | `drivers [--roles]` | 只列已启用构建的驱动；默认整机注册列表，`--roles` 改为独立角色列表；仿真驱动按机械臂和末端角色列出 |
-| `configure MODEL` | 生成 `SITE/MODEL/device.yaml` 并设为当前设备；`--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD`；不覆盖已有文件 |
+| `configure MODEL` | 创建或复用 `SITE/MODEL/device.yaml` 并设为当前设备；创建选项：`--variant NAME`（默认 `arm`）、`--set NAME=VALUE`、`--python CMD` |
 | `use [NAME]` | 把 `SITE/NAME/device.yaml` 设为当前设备；省略 `NAME` 时只列出已配置的设备，`*` 标记当前设备 |
 | `validate` / `inspect` / `capabilities` | 同 `manipulation-device` 对应子命令 |
 | `run --plan FILE [--enable]` | 执行指定计划中的顺序任务；默认不使能 |

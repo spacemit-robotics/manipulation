@@ -179,7 +179,17 @@ SITE/
 └── device.yaml -> nero/device.yaml    # 当前设备
 ```
 
-`configure` 生成配置后，把该设备设为当前设备；`inspect`、`monitor` 和单次运动命令默认控制当前设备，无需重复指定。
+`configure MODEL` 创建或复用 `SITE/MODEL/device.yaml`，成功后把该设备设为当前设备。
+
+| 配置状态 | `configure` 的行为 |
+| --- | --- |
+| 文件不存在 | 按模板生成配置，离线校验后选中 |
+| 已有有效配置，型号匹配 | 保留文件内容，直接选中 |
+| 配置无效或型号不匹配 | 报错，保持原来的当前设备 |
+
+`--variant`、`--set` 和 `--python` 只用于生成新文件。修改已有配置时，编辑该文件，或备份并移走后重新生成。
+
+`inspect`、`monitor` 和单次运动命令默认控制当前设备，无需重复指定。
 
 ```bash
 manipulation use          # 列出已配置的设备，* 标记当前设备
@@ -196,13 +206,14 @@ Nero 经支持 SocketCAN 的 USB-CAN 适配器以 1 Mbps 连接主机；Revo2 �
 
 ```bash
 sudo ip link set can0 up type can bitrate 1000000
-manipulation configure nero --variant revo2_right   # 仅机械臂时去掉 --variant
+# 仅机械臂时去掉 --variant revo2_right
+manipulation configure nero --variant revo2_right && manipulation validate
 manipulation inspect
 manipulation teach pose_01.json
 manipulation hand-move 1 1 0.7 1 1 1
 ```
 
-- **配置**：保存到 `SITE/nero/device.yaml`，已有文件不覆盖。CAN 接口不是 `can0` 时，追加 `--set channel=<接口名>`。
+- **配置**：保存到 `SITE/nero/device.yaml`，已有有效配置会被复用并选中。首次生成时，CAN 接口不是 `can0` 可追加 `--set channel=<接口名>`；已有配置直接修改文件中的接口名。
 - **只读命令**：`inspect` 读取状态，`teach` 记录静止姿态，均不运动。
 - **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出位置，默认执行 2 s。
   - 位置 `0` 为闭合、`1` 为张开，所有末端执行器相同；

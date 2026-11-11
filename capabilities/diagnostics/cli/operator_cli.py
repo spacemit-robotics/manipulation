@@ -3,6 +3,7 @@
 """Device operator commands. Model-independent; no implicit enable, home or recovery."""
 
 import math
+from pathlib import Path
 
 from .operator_support import Context, argument_parser, load_tool, run
 
@@ -341,20 +342,22 @@ def main():
     task.add_argument("--enable", action="store_true", help="explicitly enable the arm first")
     configure = commands.add_parser(
         "configure",
-        help="create SITE/MODEL/device.yaml from a model template and make it the current device",
+        help="create or reuse SITE/MODEL/device.yaml and make it the current device",
     )
     configure.add_argument("model", help="robot description, for example nero")
     configure.add_argument(
-        "--variant", default="arm", help="template under the model's devices/ (default: arm)"
+        "--variant", default="arm", help="template for a new configuration (default: arm)"
     )
     configure.add_argument(
         "--set",
         action="append",
         default=[],
         metavar="NAME=VALUE",
-        help="template value, for example channel=can1",
+        help="template value for a new configuration, for example channel=can1",
     )
-    configure.add_argument("--python", default="python3", help="interpreter for vendor workers")
+    configure.add_argument(
+        "--python", default="python3", help="vendor worker interpreter for a new configuration"
+    )
     use = commands.add_parser(
         "use", help="choose the current device, or list the configured devices"
     )
@@ -513,16 +516,33 @@ def main():
         )
     elif args.operation == "configure":
         context.check_selectable()
+        if not args.model or args.model in (".", "..") or Path(args.model).name != args.model:
+            raise ValueError("model must be a single directory name")
         tool = load_tool(context.data("manipulation") / "tools/configure_device.py")
-        tool.configure(
-            context.prefix,
-            args.model,
-            context.local(args.model) / "device.yaml",
-            args.variant,
-            tool.parse_values(args.set),
-            args.python,
-        )
+        values = tool.parse_values(args.set)
+        tool.templates(context.prefix, context.layout, args.model)
+        output = context.local(args.model) / "device.yaml"
+        existing = output.exists() or output.is_symlink()
+        if existing:
+            if not output.is_file():
+                raise ValueError(f"configuration path is not a file: {output}")
+            actual = context.describe(output)["model"]
+            if actual != args.model:
+                raise ValueError(
+                    f"existing configuration {output} is for model {actual!r}, "
+                    f"not {args.model!r}; current device unchanged"
+                )
+        else:
+            tool.configure(
+                context.prefix, args.model, output, args.variant, values, args.python
+            )
         context.select(args.model)
+        if existing:
+            print(f"selected existing configuration: {output}")
+            print(
+                "configuration unchanged; creation options (--variant, --set, --python) "
+                "are not applied to existing configurations"
+            )
         print(f"current device: {args.model}")
     elif args.operation == "use":
         if args.name:
