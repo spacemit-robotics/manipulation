@@ -43,7 +43,12 @@ manipulation drivers
 manipulation drivers --roles
 ```
 
-列表只包含已启用构建的驱动。`mock_device` 是整机驱动，`mock` 是角色驱动；`mujoco_ur5e` 和 `mujoco_robotiq_2f85` 分别注册机械臂与末端角色，启用仿真构建选项后出现在 `--roles` 列表中。
+| 命令 | 作用 |
+| --- | --- |
+| `manipulation drivers` | 整机驱动，如 `mock_device` |
+| `manipulation drivers --roles` | 分别列出机械臂与末端角色驱动，如 `mock` |
+
+列表只包含已启用构建的驱动。启用仿真构建选项后，角色列表包含机械臂 `mujoco_ur5e` 和末端 `mujoco_robotiq_2f85`。
 
 ## 2. 运行 Mock
 
@@ -63,7 +68,9 @@ manipulation demo
 | 末端执行器 | `mock`、`revo2`、`so101_gripper`、`mujoco_robotiq_2f85`（按需构建） |
 
 不同连接分别填写 `resource_id`；共用连接时使用相同标识，且该驱动对须注册共享连接工厂。
-Nero / Revo2、SO101 / 原配夹爪和 MuJoCo 仿真角色已提供共享连接。软件组合不代表机械安装、电气连接或应用动作兼容。
+Nero / Revo2、SO101 / 原配夹爪和 MuJoCo 仿真角色已提供共享连接。
+
+软件组合不代表机械安装、电气连接或应用动作兼容。
 
 在组件目录运行独立组合示例，无需硬件：
 
@@ -106,6 +113,7 @@ manipulation run --plan examples/simulation/ur5e_robotiq.yaml
 ```
 
 示例执行六轴机械臂点位和 Robotiq 2F85 夹爪开合；仅机械臂使用 `examples/simulation/ur5e_arm.yaml`。
+
 模型网格按固定版本下载并校验，MuJoCo 库由构建系统获取。`MANIPULATION_ENABLE_MUJOCO` 默认关闭。
 
 - 机械臂选择 `mujoco_ur5e`，夹爪选择 `mujoco_robotiq_2f85`；相同 `resource_id` 和 `mapping_file` 共用一个物理世界。
@@ -121,7 +129,9 @@ mm -DMANIPULATION_ENABLE_MUJOCO=ON -DMANIPULATION_ENABLE_SIMULATION_RENDERER=ON
 manipulation-simulation --plan examples/simulation/ur5e_robotiq.yaml --viewer
 ```
 
-服务保持一个物理世界，窗口与相机只读取它，不执行配置中的 `steps`。在第二个已加载 SDK 环境的终端、同一组件目录执行：
+服务保持一个物理世界，窗口与相机只读取它，不执行配置中的 `steps`。
+
+在第二个已加载 SDK 环境的终端、同一组件目录执行：
 
 ```bash
 manipulation run --plan examples/simulation/ur5e_robotiq_remote.yaml
@@ -129,6 +139,7 @@ manipulation-simulation-camera --camera overview --output camera_frame
 ```
 
 `camera_frame/` 保存彩色图 `rgb.ppm`、米制深度 `depth.f32` 和相机参数 `metadata.json`；已有目录不覆盖。
+
 窗口和模拟相机需要 X11 桌面，隐藏相机窗口也需要显示服务。省略 `--viewer` 可只提供控制服务。
 
 服务仅监听 `127.0.0.1:9100`。K3 连接 PC 时，在 K3 保持 SSH 转发运行，再使用同一远程配置：
@@ -146,6 +157,7 @@ mm -DMANIPULATION_ENABLE_MUJOCO_REMOTE=ON \
 ```
 
 远端世界只接受一个控制连接；连接断开或租约到期时请求保持，重新连接不恢复旧动作。
+
 远程示例的反馈时限为 `1.0` 秒，包含网络往返耗时；服务端本地采样时限独立生效。
 
 完整视觉抓取示例位于 `application/ros2/linksee/perceptive_grasp`，使用 UR5e、Robotiq 2F85、模拟 RGB-D 和桌面物体场景。
@@ -177,6 +189,7 @@ manipulation use so101    # 切换当前设备
 ## 4. 连接 Nero
 
 Nero 经支持 SocketCAN 的 USB-CAN 适配器以 1 Mbps 连接主机；Revo2 右手接在机械臂末端口，与机械臂共用连接。
+
 退出厂商 Web、遥操作等其他控制程序后执行：
 
 ```bash
@@ -204,6 +217,7 @@ Nero 失能或断电后会坍塌，不能用失能或断电代替软件停止。
 ### 校准舵机
 
 SO101 使用通用舵机，首次使用前须校准。已有这台机械臂的 `so101_calibration.json`、`so101_gripper_calibration.json` 时，放入 `SITE/so101/` 即可跳过本节。
+
 新装或重新装配后，先支撑机械臂、取下夹爪中的物品并释放扭矩，再执行：
 
 ```bash
@@ -289,9 +303,16 @@ hand-eye export-perceptive cal_01 --installation-id workcell-01 \
   --camera-type realsense --output perceptive_calibration.yaml
 ```
 
-把生成的 `calibration.realsense.T_base_camera` 合入抓取配置；平移单位为 m，旋转为 XYZ RPY rad。导出只新建外参片段，不自动修改应用配置或切换控制后端。
-`--installation-id` 必须与采集时显式确认的标识相同；相机类型须匹配，坐标系须为 `color_optical`，结果须通过质量检查并已 `promote`。
-`workcell-01` 标识固定的机械臂、相机安装；更换基座、相机位置或安装后须重新标定，不能改写标识复用旧结果。输出文件不覆盖。
+把生成的 `calibration.realsense.T_base_camera` 合入抓取配置；平移单位为 m，旋转为 XYZ RPY rad。
+导出只新建外参片段，不自动修改应用配置或切换控制后端，也不覆盖已有文件。
+
+导出条件：
+
+- `--installation-id` 与采集时显式确认的标识相同。
+- 相机类型匹配，坐标系为 `color_optical`。
+- 结果通过质量检查，并已执行 `promote`。
+
+`workcell-01` 标识固定的机械臂、相机安装。更换基座、相机位置或安装后须重新标定，不能改写标识复用旧结果。
 
 ## 7. 在程序中使用
 
@@ -359,9 +380,11 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 
 无需修改公共头文件或已有驱动。驱动约定见[开发指南](docs/development.md)。
 
-新增顺序能力时，在模块中注册参数解析、支持条件、参数校验和执行函数，使用 `manipulation_register_capability` 纳入构建。
-树外能力模块通过 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定，多个目录用分号分隔。
-示例位于 `examples/capability_probe/`；无需修改任务解析器或执行分支，构建步骤见[开发指南](docs/development.md#注册顺序能力)。
+新增顺序能力时，在模块中注册参数解析、支持条件、参数校验和执行函数，无需修改任务解析器或执行分支。
+
+- **构建注册**：使用 `manipulation_register_capability` 纳入构建。
+- **树外模块**：通过 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定，多个目录用分号分隔。
+- **示例**：`examples/capability_probe/`，构建步骤见[开发指南](docs/development.md#注册顺序能力)。
 
 ## 9. 使用限制
 

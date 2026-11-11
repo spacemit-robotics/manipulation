@@ -67,6 +67,7 @@ steps: []
 | `device.effector.options` | 该末端的字符串选项，最多 32 项；默认空 |
 
 资源标识只允许字母、数字、`_`、`-`。不同标识调用独立工厂；相同标识要求该驱动对已注册共享工厂，且连接选项一致。
+
 `model` 标识机械臂关节链，不由末端型号推断。组合不改变设备的能力声明。
 
 | 角色驱动 | 选项 |
@@ -79,12 +80,15 @@ steps: []
 | 机械臂 `mujoco_mapped_arm`、末端 `mujoco_mapped_effector` | 自定义模型；选项与型号仿真驱动相同，关节和执行器由映射定义 |
 
 各硬件选项含义与下表的整机驱动一致。`nero + revo2`、`so101 + so101_gripper` 及同一映射下的仿真机械臂与末端可共享连接；SO101 共享配置中重复提供的选项须一致。
+
 `mujoco` 可作为通用映射角色的兼容输入名称；设备配置使用型号驱动名或上述通用映射驱动名。
 
 ### 仿真映射
 
-`MANIPULATION_ENABLE_MUJOCO=ON` 构建本地引擎与远程客户端；
-`MANIPULATION_ENABLE_MUJOCO_REMOTE=ON` 可单独构建远程客户端。
+| 构建选项 | 构建内容 |
+| --- | --- |
+| `MANIPULATION_ENABLE_MUJOCO=ON` | 本地引擎与远程客户端 |
+| `MANIPULATION_ENABLE_MUJOCO_REMOTE=ON` | 可单独构建远程客户端 |
 
 | 驱动选项 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -94,14 +98,29 @@ steps: []
 | `port` | `9100` | 远程服务端口 |
 
 远程连接先比较角色、关节、限位和映射契约；不向服务端传递模型路径，也不加载客户端场景。
-`maximum_age_s` 是接收端反馈时限：服务端检查本地采样年龄，客户端检查源采样年龄加网络往返耗时，
-两端可分别配置。远程示例使用 `1.0` 秒，超过时限仍停止当前任务，不自动重试。
+
+`maximum_age_s` 是接收端反馈时限，两端可分别配置：
+
+- 服务端检查本地采样年龄。
+- 客户端检查源采样年龄加网络往返耗时。
+
+远程示例使用 `1.0` 秒，超过时限仍停止当前任务，不自动重试。
+
 映射采用单个 YAML 文档，最多 256 KiB，拒绝未知或重复字段。
 
 型号驱动还要求映射与对应设备一致：
 
-- `mujoco_ur5e`：六个关节依次为 `shoulder_pan_joint`、`shoulder_lift_joint`、`elbow_joint`、`wrist_1_joint`、`wrist_2_joint`、`wrist_3_joint`；执行器名称分别去掉 `_joint`。所有关节和执行器可使用同一个名称前缀，例如 `robot_`。
-- `mujoco_robotiq_2f85`：单个 `gripper` 通道，使用位置反馈；关节为 `gripper_right_driver_joint`，执行器为 `gripper_fingers_actuator`，两者可使用同一个名称前缀。`joint_closed` / `joint_open` 为 `0.8` / `0.0`，`control_closed` / `control_open` 为 `255.0` / `0.0`，数值容差为 `1e-6`。
+**机械臂 `mujoco_ur5e`：**
+
+- 六个关节依次为 `shoulder_pan_joint`、`shoulder_lift_joint`、`elbow_joint`、`wrist_1_joint`、`wrist_2_joint`、`wrist_3_joint`。
+- 执行器名称分别去掉 `_joint`。
+- 所有关节和执行器可使用同一个名称前缀，例如 `robot_`。
+
+**末端 `mujoco_robotiq_2f85`：**
+
+- 单个 `gripper` 通道，使用位置反馈。
+- 关节为 `gripper_right_driver_joint`，执行器为 `gripper_fingers_actuator`；两者可使用同一个名称前缀。
+- `joint_closed` / `joint_open` 为 `0.8` / `0.0`，`control_closed` / `control_open` 为 `255.0` / `0.0`，数值容差为 `1e-6`。
 
 其他模型使用 `mujoco_mapped_arm` 和 `mujoco_mapped_effector`，按下表定义映射。
 
@@ -122,27 +141,37 @@ steps: []
 | `hold_timeout_s` | 数值，默认 `2` | 保持确认期限，s，`(0,10]` |
 | `synchronized_joint_point` | 布尔，默认 `false` | 各关节参考值按共同时间插值；`false` 为各轴独立限速 |
 
-机械臂使用转动关节和单位传动比的位置执行器；末端支持直接关节或固定关节腱传动的仿射位置执行器。
-执行器必须实际驱动对应的反馈关节，各角色的受控关节不能重叠；不支持空间腱传动。
-初始状态须静止且控制值与位置匹配；连接时拒绝被模型禁用的执行器，不自动改写初始目标。
-`speed_scale` 缩放目标变化速率，不保证带载时的实际关节速度。
-末端需要 `feedback: position`，归一化位置始终为 `0` 闭合、`1` 张开，不报告抓稳判断；动作时长不得小于模型时间步。
+模型与控制约束：
+
+- **执行器**：机械臂使用转动关节和单位传动比的位置执行器；末端支持直接关节或固定关节腱传动的仿射位置执行器。
+- **反馈对应**：执行器必须实际驱动对应的反馈关节，各角色的受控关节不能重叠；不支持空间腱传动。
+- **初始状态**：须静止且控制值与位置匹配；连接时拒绝被模型禁用的执行器，不自动改写初始目标。
+- **速度**：`speed_scale` 缩放目标变化速率，不保证带载时的实际关节速度。
+- **末端位置**：需要 `feedback: position`，归一化位置始终为 `0` 闭合、`1` 张开，不报告抓稳判断；动作时长不得小于模型时间步。
+
 物理软限位允许端点附近的小幅超出：不超过末端到位容差与 `0.01` 的较小值时，位置显示为对应端点；
 超过该范围则报错。运动状态仍使用实际速度，不因端点显示而认定停止。
 
 相同 `resource_id` 的仿真机械臂与末端必须引用同一个映射文件，并共用物理世界和步进线程。
-本地模式中，不同资源标识创建不同世界，即使使用相同场景；世界随设备会话创建和销毁。
-远程模式中，服务端持有世界，连接或关闭客户端不重置场景。服务端租约拒绝第二个控制者，客户端更换 `resource_id` 不能绕过它。
+
+| 模式 | 世界与控制连接 |
+| --- | --- |
+| 本地 | 不同资源标识创建不同世界，即使使用相同场景；世界随设备会话创建和销毁 |
+| 远程 | 服务端持有世界，连接或关闭客户端不重置场景；服务端租约拒绝第二个控制者，客户端更换 `resource_id` 不能绕过它 |
+
 引擎采样时间、位置和速度参与会话的到位、过期、取消与超时判定。
+
 此后端仅提供关节点位、跟随、末端位置和保持；不提供使能、失能、连续路径、定时轨迹或抓稳检测。
 
 ### 仿真服务与相机
 
 `manipulation-simulation --plan FILE [--port 9100] [--viewer] [--camera overview]`
+
 仅接受本地 MuJoCo 设备配置，不执行其中的顺序任务。默认仅监听回环地址。
 `--viewer` 和相机采集需要构建 `MANIPULATION_ENABLE_SIMULATION_RENDERER=ON`，并具备 X11 桌面。
 
 `manipulation-simulation-camera --output DIRECTORY [--camera overview] [--host 127.0.0.1] [--port 9100] [--width 640] [--height 480]`
+
 使用只读连接，不取得控制权。输出目录必须不存在。
 
 | 输出 | 格式 |
@@ -151,10 +180,12 @@ steps: []
 | `depth.f32` | 行优先、左上原点、little-endian float32；光学轴 Z 深度，单位 m，无效值为 `0` |
 | `metadata.json` | 服务端 `epoch`；`data` 包含宽高、`sample_id`、`sim_time`、相机内参 `K` 和 `T_world_camera` |
 
-`K` 为行优先 3×3 矩阵，像素中心使用整数坐标。
-`T_world_camera` 为行优先 4×4 矩阵，把光学坐标（右、下、前）变换到世界坐标。
+- `K` 为行优先 3×3 矩阵，像素中心使用整数坐标。
+- `T_world_camera` 为行优先 4×4 矩阵，把光学坐标（右、下、前）变换到世界坐标。
+
 彩色图、深度图、内外参与样本编号来自同一快照；采集不推进物理时间。
 相机的 `sample_id` 为引擎样本编号，设备状态的 `sample_id` 为控制会话反馈编号，不能直接比较。
+
 服务器重启产生不同 `epoch`；客户端不会自动重连或重放运动。
 
 | 现象 | 处理 |
@@ -268,9 +299,15 @@ steps: []
 
 `serve` 的 `--allow-disable`、`--allow-effector-enable`、`--allow-effector-disable` 分别授权机械臂失能、末端执行器使能和失能，默认均关闭。
 
-退出码：`0` 成功；`1` 任务未成功或被中断；`2` 参数、配置或连接错误；`3` 全部步骤完成，但含 `unverified` 步骤。
+| 退出码 | 含义 |
+| --- | --- |
+| `0` | 成功 |
+| `1` | 任务未成功或被中断 |
+| `2` | 参数、配置或连接错误 |
+| `3` | 全部步骤完成，但含 `unverified` 步骤 |
 
 `run` 最后一行是汇总结果，形如 `{"status":"succeeded","physical_grip_verified":false}`。
+
 独立组合的 `describe` 另含 `arm_driver`、`effector_driver`、`arm_resource_id`、`effector_resource_id`；`driver` 为 `composed`。
 
 **状态字段**（`inspect` 输出与 Python `state()` 返回同一份 JSON）：
@@ -351,10 +388,20 @@ JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`
 
 共享会话包含 `manifest.json`、样本和绑定的设备、模型、相机、标定板及坐标系身份。
 采集未完成、身份混用或依赖文件变化会被拒绝。旧 `dataset.json` 及旧 Dice 会话继续按原格式读取。
-跨应用导出要求显式安装标识、匹配的相机类型和 `color_optical` 坐标系、通过质量门限的结果。
-`--installation-id` 必须与结果绑定的 `installation_id` 相同；自动生成的会话编号不能替代显式确认的安装标识。安装变化后重新标定。
-`export-perceptive` 写入 `calibration.<camera_type>.T_base_camera`：`translation` 为 m，`rotation` 为 XYZ RPY rad，方向为相机到机械臂基座，不修改应用配置。
-命令读取会话内已 `promote` 的 `active.json`，输出文件必须不存在。
+
+跨应用导出条件：
+
+- **安装标识**：`--installation-id` 与结果绑定的 `installation_id` 相同；自动生成的会话编号不能替代显式确认的安装标识。安装变化后重新标定。
+- **相机与坐标系**：相机类型匹配，坐标系为 `color_optical`。
+- **结果质量**：通过质量门限，并已执行 `promote`；命令读取会话内的 `active.json`。
+- **输出文件**：必须不存在，命令不修改应用配置。
+
+`export-perceptive` 写入 `calibration.<camera_type>.T_base_camera`，方向为相机到机械臂基座：
+
+| 字段 | 单位与约定 |
+| --- | --- |
+| `translation` | m |
+| `rotation` | XYZ RPY rad |
 
 ### so101-calibrate
 
@@ -435,9 +482,11 @@ JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`
 | `FollowArm(point)` / `FollowEffector(point)` | 目标跟随：发出目标即返回，见 [§6 完成条件](#完成条件) |
 | `Latched()` | 是否处于锁定 |
 
-`CreatePlanDevices(plan, registry)` 同时支持整机与独立角色配置。
-`LoadDevicePlan` 和 `RunDeviceSteps` 支持传入能力注册表的重载；未传入时使用构建中登记的能力。
-`DeviceRegistry::RegisterArm` / `RegisterEffector` / `RegisterShared` 分别注册单角色与共享工厂；`Register` 保持整机接口。
+设备装配与注册：
+
+- `CreatePlanDevices(plan, registry)` 同时支持整机与独立角色配置。
+- `LoadDevicePlan` 和 `RunDeviceSteps` 支持传入能力注册表的重载；未传入时使用构建中登记的能力。
+- `DeviceRegistry::RegisterArm` / `RegisterEffector` / `RegisterShared` 分别注册单角色与共享工厂；`Register` 保持整机接口。
 
 ## 6. Python API
 
@@ -512,7 +561,9 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `MakeBuiltinKinematicsRegistry().Create(id, config)` | 创建已启用的求解器，不连接设备 |
 
 `InverseOptions` 默认时限 `0.1 s`、迭代上限 `1000`、加权误差阈值 `1e-4`。
+
 `position_weight` 在 `[0,1]` 内：`1` 只求位置，`0` 只求方向，其他值对位置和方向按互补权重求解。
+
 求解结果不是碰撞规划；应用仍需检查工作空间、设备限位与完整路径。
 
 ### Python 接口

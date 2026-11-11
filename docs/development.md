@@ -85,10 +85,14 @@
 
 ### 共享连接
 
-不同 `resource_id` 的臂和手分别调用各自工厂。相同标识必须注册 `SharedDeviceDriver`，
-由其工厂创建两者并共享连接对象；未登记的同资源组合会在连接前拒绝。参考
-`drivers/common/agx_session/` 或 `drivers/common/so101_session/`。
+| 资源标识 | 连接方式 |
+| --- | --- |
+| 不同 `resource_id` | 机械臂和末端分别调用各自工厂 |
+| 相同 `resource_id` | 必须注册 `SharedDeviceDriver`，由其工厂创建两者并共享连接对象；未登记的同资源组合在连接前拒绝 |
+
+共享连接示例位于 `drivers/common/agx_session/` 和 `drivers/common/so101_session/`。
 会话先按名称排序、去重并锁定所有资源，再连接任何设备；任一锁或连接失败时释放全部资源。
+
 SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件的公开接口：
 
 - `motor_alloc_uart` 打开串口，`motor_get_paras` / `motor_set_paras` 读写寄存器；
@@ -118,9 +122,13 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 
    注册函数必须在 `spacemit::manipulation` 命名空间内且具有外部链接。
    只登记模块实现的角色；末端和共享工厂不是必填项。
-   `ValidateArm` 接收 `DeviceConfig`，`ValidateTool` 接收 `EffectorConfig`；二者另接收各自 `DriverOptions`。
-   `CreateArm` / `CreateTool` 返回对应接口的 `unique_ptr`。
-   共享回调接收 `DeviceDefinition` 和两份选项，工厂返回 `Devices`，须校验连接参数一致。
+
+   | 回调 | 输入 / 返回值 |
+   | --- | --- |
+   | `ValidateArm` / `ValidateTool` | 分别接收 `DeviceConfig` / `EffectorConfig`，另接收各自 `DriverOptions` |
+   | `CreateArm` / `CreateTool` | 返回对应接口的 `unique_ptr` |
+   | 共享回调 | 接收 `DeviceDefinition` 和两份选项，须校验连接参数一致；工厂返回 `Devices` |
+
    校验只检查配置，工厂只构造对象，均不访问硬件。
    `Register(DeviceDriver)` 继续用于兼容整机 `device.driver` 配置。
 
@@ -131,8 +139,11 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
    manipulation_register_device(RegisterMyDevice)
    ```
 
-3. 构建时纳入模块：树外模块用 `-DMANIPULATION_EXTRA_DRIVER_DIRS=<目录>`；
-   放入本仓库时在根 `CMakeLists.txt` 增加一个 `MANIPULATION_ENABLE_<型号>` 开关和 `add_subdirectory`。
+3. 构建时纳入模块：
+
+   - 树外模块：用 `-DMANIPULATION_EXTRA_DRIVER_DIRS=<目录>` 指定。
+   - 仓库内模块：在根 `CMakeLists.txt` 增加一个 `MANIPULATION_ENABLE_<型号>` 开关和 `add_subdirectory`。
+
    构建系统生成显式调用注册函数的代码，静态链接时不会被裁剪。
 
 4. 在 `descriptions/robots/<型号>/` 提供 `devices/<variant>.yaml` 模板、`model.json`、URDF 和许可，
@@ -158,15 +169,19 @@ SO101 经 `drivers/common/so101_session/feetech_bus.cpp` 调用 `motor` 组件�
 
 符合通用映射约定的模型无需新增驱动或公共 API。需要力矩控制、复杂手部传动或新物理引擎时，
 实现对应后端，定义其控制与反馈能力，再注册驱动。
+
 MJCF 不替代运动学与手眼标定所需的 URDF 和 `model.json`。
 
-需要共享窗口、相机和控制时，由 `MujocoRuntime` 持有世界，通过 `CreateDevices()` 交给 `DeviceSession`。
-`Snapshot()` 供渲染和规划读取；规划只修改复制的数据，不直接写物理世界。
-动态接触约束属于场景操作，不能作为通用设备 API 的抓稳结果；`AttachWeld()` 会在世界锁内重新检查双侧接触。
+共享窗口、相机和控制时，各接口的职责如下：
+
+- `MujocoRuntime` 持有世界，通过 `CreateDevices()` 交给 `DeviceSession`。
+- `Snapshot()` 供渲染和规划读取；规划只修改复制的数据，不直接写物理世界。
+- `AttachWeld()` 在世界锁内重新检查双侧接触。动态接触约束属于场景操作，不能作为通用设备 API 的抓稳结果。
 
 远程后端实现相同私有会话接口，服务端复用本地驱动。图像请求使用独立只读连接，不取得控制租约。
-控制超时、断连和租约失效会停止参考更新并请求保持；通信失败不能证明物理停止。
-服务端时钟不与客户端绝对时间混用，命令序号和采样编号共同防止旧反馈被当作完成证据。
+
+- **异常处理**：控制超时、断连和租约失效会停止参考更新并请求保持；通信失败不能证明物理停止。
+- **反馈判定**：服务端时钟不与客户端绝对时间混用，命令序号和采样编号共同防止旧反馈被当作完成证据。
 
 ## 5. 新增能力与工具
 
@@ -190,7 +205,9 @@ MJCF 不替代运动学与手眼标定所需的 URDF 和 `model.json`。
 | `execute` | 经 `DeviceSession` 执行，传递取消请求并保留原始结果语义 |
 
 `parse`、`unsupported_reason`、`validate` 不访问硬件。执行前检查整个序列；实时状态条件仍由会话在下发前检查。
-能力不能自动使能、清错或把 `unverified` 改为成功。注册表在开始解析任务前装配，不支持并发修改。
+
+能力不能自动使能、清错或把 `unverified` 改为成功。
+注册表在开始解析任务前装配，不支持并发修改。
 
 模块用以下方式登记，不修改公共解析器和执行器：
 
@@ -200,7 +217,9 @@ manipulation_register_capability(RegisterMyCapability)
 ```
 
 注册函数位于 `spacemit::manipulation` 命名空间，接收 `CapabilityRegistry*`。
-构建时用 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定模块目录。在 SDK 根目录执行以下命令运行随附示例：
+构建时用 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定模块目录。
+
+在 SDK 根目录执行以下命令运行随附示例：
 
 ```bash
 cd components/control/manipulation
@@ -215,9 +234,13 @@ build-capability/manipulation-device run examples/capability_probe/device.yaml
 ### 复用手眼标定
 
 公共模块提供采样、会话记录、求解、评估和格式导出；应用保留自动运动路线、桌面登记和业务批准流程。
-Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样路线仍由应用管理。
-`perceptive_grasp` 的真机执行器使用公共 `DeviceSession` 和运动学接口，标定采集使用只读 `DeviceClient` 与公共采样模块。
-公共 CLI 也可采集并导出它的 `T_base_camera` 配置；导出仅新建外参片段，不切换应用控制后端。
+
+| 应用 | 公共模块的使用方式 |
+| --- | --- |
+| Dice Arena | CLI/Web 使用相同的采样和求解模块；Nero 自动采样路线由应用管理 |
+| `perceptive_grasp` | 真机执行器使用 `DeviceSession` 和运动学接口；标定采集使用只读 `DeviceClient` 与公共采样模块 |
+
+公共 CLI 也可采集并导出 `perceptive_grasp` 的 `T_base_camera` 配置。导出仅新建外参片段，不切换应用控制后端。
 
 | 模块 | 接口 |
 | --- | --- |
@@ -226,8 +249,11 @@ Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样�
 | `hand_eye` | `solve`、`evaluate_residuals`：眼在手外求解与残差评估，不访问设备 |
 
 配置指定设备计划、关节模型、相机采样模块和安装标识。记录包含设备与模型摘要、关节顺序、相机序列号、内参、标定板几何及坐标系。
-同一会话不能混用身份或未完成的样本；跨应用导出要求明确安装标识和通过质量阈值的结果。
-`export-perceptive` 要求导出标识与采集时显式确认的 `installation_id` 相同，相机类型匹配且使用 `color_optical` 坐标系。
+
+- **会话一致性**：同一会话不能混用身份或未完成的样本。
+- **跨应用导出**：要求明确安装标识，并使用通过质量阈值的结果。
+- **`export-perceptive`**：导出标识与采集时显式确认的 `installation_id` 相同，相机类型匹配且使用 `color_optical` 坐标系。
+
 固定安装改变后重新标定，不改写标识复用旧结果。可执行流程见 [README 手眼标定](../README.md#6-手眼标定)。
 
 手眼标定的相机采样是可替换模块（`--sampler`），提供 `create_sampler(options)`，返回的对象实现：
@@ -240,6 +266,7 @@ Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样�
 | `close()` | 释放相机 |
 
 `port` 只读取机械臂反馈：`read_joints()` 返回新鲜关节，`read()` 返回 URDF 法兰位姿。
+
 内置实现为 `spacemit_manipulation.charuco_sampler`（RealSense + ChArUco）。
 采样判定（静止、丢弃旧帧、三帧一致）由 `capabilities/calibration/python/sampling.py` 提供，新采样模块可直接复用。
 
@@ -256,9 +283,10 @@ Dice Arena 的 CLI/Web 使用相同的采样和求解模块，Nero 自动采样�
 ### C++ 运动学
 
 应用通过 `manipulation/kinematics.h` 创建独立求解器，链接 `spacemit::manipulation_kinematics`。
-运动学不放入设备驱动；设备与模型使用相同的关节顺序，求解器不访问硬件。
-新增算法实现 `Kinematics`，通过 `KinematicsRegistry::Register` 注册工厂；未注册的名称报错，不回退到其他算法。
-求解结果只满足运动学与关节限位约束，应用负责碰撞和任务约束检查，再通过设备会话执行。
+
+- **模型约定**：运动学不放入设备驱动；设备与模型使用相同的关节顺序，求解器不访问硬件。
+- **算法扩展**：实现 `Kinematics`，通过 `KinematicsRegistry::Register` 注册工厂；未注册的名称报错，不回退到其他算法。
+- **执行前检查**：求解结果只满足运动学与关节限位约束，应用负责碰撞和任务约束检查，再通过设备会话执行。
 
 ## 7. 验证
 
