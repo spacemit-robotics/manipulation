@@ -93,6 +93,8 @@ manipulation run --plan examples/capability_sequence.yaml
 
 ### UR5e / MuJoCo 物理仿真
 
+物理仿真与渲染由 [MuJoCo 仿真组件仓库](https://github.com/spacemit-robotics/simulation_mujoco) 提供，SDK 路径为 `components/simulation/mujoco`。
+
 在 SDK 根目录执行，不需要机械臂或显示器：
 
 ```bash
