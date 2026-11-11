@@ -1,6 +1,10 @@
 <mujoco model="rgbd_contract">
   <option timestep="0.05" gravity="0 0 0"/>
-  <visual><map znear="0.01" zfar="10"/><quality shadowsize="0" offsamples="0"/></visual>
+  <visual>
+    <global offwidth="640" offheight="480"/>
+    <map znear="0.01" zfar="10"/>
+    <quality shadowsize="0" offsamples="0"/>
+  </visual>
   <worldbody>
     <light pos="0 0 3" diffuse="1 1 1"/>
     <geom name="ground" type="plane" size="3 3 0.1" rgba="0.5 0.5 0.5 1"/>

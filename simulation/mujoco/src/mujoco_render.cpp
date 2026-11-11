@@ -10,6 +10,9 @@
 #include "mujoco_render_context.h"
 #include "mujoco_world.h"
 
+#if defined(MUJOCO_RENDER_GL4ES)
+#define GL_GLEXT_PROTOTYPES
+#endif
 #include <GL/gl.h>
 #include <mujoco/mujoco.h>
 #include <sys/syscall.h>
@@ -46,14 +49,41 @@ void ValidateName(const std::string& name) {
     }
 }
 
-void CheckGraphics(const char* operation) {
-    const GLenum error = glGetError();
+void CheckGraphics(const char* operation, GLenum error = glGetError()) {
     if (error != GL_NO_ERROR) {
         std::ostringstream message;
         message << "MuJoCo OpenGL error 0x" << std::hex << error << " during " << operation;
         throw std::runtime_error(message.str());
     }
 }
+
+#if defined(MUJOCO_RENDER_GL4ES)
+void ConfigureDepthReadback(mjrContext* context) {
+    // GLES floating-point depth reads require floating-point storage. Match
+    // mjr_resizeOffscreen so the initial framebuffer has the same format.
+    GLint previous_renderbuffer = 0;
+    glGetIntegerv(GL_RENDERBUFFER_BINDING, &previous_renderbuffer);
+    CheckGraphics("RGB-D renderbuffer state");
+    glBindRenderbuffer(GL_RENDERBUFFER, context->offDepthStencil);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH32F_STENCIL8,
+            context->offWidth, context->offHeight);
+    const GLenum allocation_error = glGetError();
+    glBindRenderbuffer(GL_RENDERBUFFER, previous_renderbuffer);
+    CheckGraphics("RGB-D floating-point depth allocation", allocation_error);
+    CheckGraphics("RGB-D renderbuffer restoration");
+
+    const int previous_buffer = context->currentBuffer;
+    mjr_setBuffer(mjFB_OFFSCREEN, context);
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    const GLenum framebuffer_error = glGetError();
+    mjr_setBuffer(previous_buffer, context);
+    CheckGraphics("RGB-D framebuffer validation", framebuffer_error);
+    CheckGraphics("RGB-D framebuffer restoration");
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        throw std::runtime_error("MuJoCo floating-point depth framebuffer incomplete");
+    }
+}
+#endif
 
 class Graphics {
 public:
@@ -86,7 +116,10 @@ public:
         graphics_model = nullptr;
     }
 
-    void Load(const WorldSnapshot& snapshot) {
+    void Load(const WorldSnapshot& snapshot, bool depth_readback = false) {
+#if !defined(MUJOCO_RENDER_GL4ES)
+        static_cast<void>(depth_readback);
+#endif
         RequireMainThread();
         window->MakeCurrent();
         if (native) {
@@ -116,6 +149,9 @@ public:
             mjv_defaultFreeCamera(native->Model(), &camera);
             context.readDepthMap = mjDEPTH_ZERONEAR;
             CheckGraphics("render context initialization");
+#if defined(MUJOCO_RENDER_GL4ES)
+            if (depth_readback) ConfigureDepthReadback(&context);
+#endif
             graphics_model = native->Model();
         }
         mj_copyData(data.get(), native->Model(), native->Data());
@@ -157,7 +193,7 @@ public:
     RgbdFrame Capture(const WorldSnapshot& snapshot, const CameraSpec& spec) {
         RequireMainThread();
         ValidateCamera(spec);
-        graphics.Load(snapshot);
+        graphics.Load(snapshot, true);
         const auto* model = graphics.native->Model();
         const int camera = mj_name2id(model, mjOBJ_CAMERA, spec.name.c_str());
         if (camera < 0) throw std::invalid_argument("MuJoCo camera not found: " + spec.name);
@@ -181,6 +217,7 @@ public:
         graphics.camera.fixedcamid = camera;
         graphics.UpdateScene();
         mjr_resizeOffscreen(spec.width, spec.height, &graphics.context);
+        CheckGraphics("RGB-D framebuffer resize");
         mjr_setBuffer(mjFB_OFFSCREEN, &graphics.context);
         if (graphics.context.currentBuffer != mjFB_OFFSCREEN) {
             throw std::runtime_error("MuJoCo offscreen framebuffer unavailable");
@@ -190,8 +227,9 @@ public:
         std::vector<std::uint8_t> bottom_rgb(3 * pixels);
         std::vector<float> bottom_depth(pixels);
         mjr_render(viewport, &graphics.scene, &graphics.context);
+        CheckGraphics("RGB-D rendering");
         mjr_readPixels(bottom_rgb.data(), bottom_depth.data(), viewport, &graphics.context);
-        CheckGraphics("RGB-D rendering and readback");
+        CheckGraphics("RGB-D readback");
         RgbdFrame frame;
         frame.width = spec.width;
         frame.height = spec.height;

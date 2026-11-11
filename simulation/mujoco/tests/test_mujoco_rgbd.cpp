@@ -44,6 +44,20 @@ void Test(const std::string& directory) {
     mujoco_sim::Renderer renderer;
     mujoco_sim::CameraSpec camera;
     camera.name = "fixed";
+    const auto default_camera = camera;
+    for (int capture = 0; capture < 2; ++capture) {
+        const auto initial = renderer.Capture(snapshot, camera);
+        Check(initial.width == 640 && initial.height == 480 &&
+                        initial.rgb.size() == 640 * 480 * 3 &&
+                        initial.depth_m.size() == 640 * 480,
+                "default image dimensions wrong");
+        Check(std::abs(Centre(initial) - 2.0f) < 0.002f,
+                "initial offscreen framebuffer metric depth incorrect");
+        Check(initial.sample_id == snapshot.SampleId() &&
+                        world.SampleId() == snapshot.SampleId() &&
+                        initial.sim_time == snapshot.Time() && world.Time() == snapshot.Time(),
+                "default capture stepped world or mismatched sample");
+    }
     camera.width = 96;
     camera.height = 64;
     const auto frame = renderer.Capture(snapshot, camera);
@@ -62,6 +76,13 @@ void Test(const std::string& directory) {
     const auto blue = 3 * (44 * frame.width + 63);
     Check(frame.rgb[red] > frame.rgb[red + 2] + 50 && frame.rgb[blue + 2] > frame.rgb[blue] + 50,
             "RGB ordering or top-left image origin wrong");
+    const auto restored = renderer.Capture(snapshot, default_camera);
+    Check(restored.width == 640 && restored.height == 480 &&
+                    restored.rgb.size() == 640 * 480 * 3 &&
+                    restored.depth_m.size() == 640 * 480,
+            "restored default image dimensions wrong");
+    Check(std::abs(Centre(restored) - 2.0f) < 0.002f,
+            "resizing back to default changed metric depth");
     {
         mujoco_sim::Renderer second;
         Check(std::abs(Centre(second.Capture(snapshot, camera)) - 2.0f) < 0.002f,

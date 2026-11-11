@@ -91,16 +91,20 @@ def wait_ready(server, log):
     raise AssertionError("viewer did not become ready:\n" + log.read_text())
 
 
-def capture(camera, port, output, environment):
-    run([camera, "--port", port, "--camera", "overview", "--width", "160", "--height", "120",
-         "--output", output], output.parent, environment)
+def capture(camera, port, output, environment, dimensions=None):
+    arguments = [camera, "--port", port, "--camera", "overview", "--output", output]
+    if dimensions is not None:
+        arguments.extend(["--width", dimensions[0], "--height", dimensions[1]])
+    width, height = dimensions if dimensions is not None else (640, 480)
+    pixels = width * height
+    run(arguments, output.parent, environment)
     metadata = json.loads((output / "metadata.json").read_text())["data"]
-    assert (metadata["width"], metadata["height"]) == (160, 120)
-    header = b"P6\n160 120\n255\n"
+    assert (metadata["width"], metadata["height"]) == (width, height)
+    header = f"P6\n{width} {height}\n255\n".encode("ascii")
     rgb = (output / "rgb.ppm").read_bytes()
-    assert rgb.startswith(header) and len(rgb) == len(header) + 160 * 120 * 3
+    assert rgb.startswith(header) and len(rgb) == len(header) + pixels * 3
     assert len(set(rgb[len(header):])) > 10, "UR5e RGB image is empty"
-    depth = struct.unpack("<19200f", (output / "depth.f32").read_bytes())
+    depth = struct.unpack(f"<{pixels}f", (output / "depth.f32").read_bytes())
     assert all(math.isfinite(value) and value >= 0 for value in depth)
     assert sum(0.1 < value < 5.0 for value in depth) > 100, "UR5e depth image is empty"
     return metadata
@@ -120,6 +124,8 @@ def check_render(bindir, data, directory, environment):
             port = wait_ready(server, log)
             camera = bindir / "manipulation-simulation-camera"
             first = capture(camera, port, directory / "frame-before", environment)
+            resized = capture(camera, port, directory / "frame-small", environment, (160, 120))
+            assert resized["sample_id"] >= first["sample_id"], "rendered world moved backwards"
             before = window_pixels()
             assert len(set(before)) > 10, "UR5e viewer framebuffer is empty"
             remote = yaml.safe_load(plan.read_text())
@@ -133,7 +139,7 @@ def check_render(bindir, data, directory, environment):
             motion = run([bindir / "manipulation", "run", "--plan", remote_plan], directory, environment)
             assert json.loads(motion.splitlines()[-1])["status"] == "succeeded", motion
             second = capture(camera, port, directory / "frame-after", environment)
-            assert second["sample_id"] > first["sample_id"], "rendered world did not advance"
+            assert second["sample_id"] > resized["sample_id"], "rendered world did not advance"
             deadline = time.monotonic() + 10
             changed = 0
             while time.monotonic() < deadline and server.poll() is None:
