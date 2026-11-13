@@ -4,7 +4,7 @@
 
 ## 1. 分层
 
-![manipulation 组件架构：调用入口、配置与设备会话、角色驱动、运行后端及公共能力](assets/architecture.svg)
+![manipulation 组件架构：调用入口、配置与设备会话、角色驱动、运行后端及公共能力](assets/architecture-layered.svg)
 
 控制入口、配置运行时和设备会话通过公共接口访问角色驱动。驱动实现 `Arm` 或 `EndEffector`，并注册独立角色、整机或共享连接工厂；公共控制层不依赖具体型号或 MuJoCo 类型。
 

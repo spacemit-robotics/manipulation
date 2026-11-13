@@ -13,7 +13,7 @@
 
 ## 系统架构
 
-![manipulation 分层架构：设备控制链、公共能力与 MuJoCo 只读图像输出](docs/assets/architecture.svg)
+![manipulation 分层架构：设备控制链、公共能力与 MuJoCo 只读图像输出](docs/assets/architecture-layered.svg)
 
 设备控制统一经过 `DeviceSession`，由角色驱动连接真机、Mock 或 MuJoCo。运动学与标定位于公共能力区，仿真图像来自物理世界的只读快照。
 

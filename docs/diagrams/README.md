@@ -14,8 +14,8 @@ python3 docs/diagrams/architecture.py --docs-ros /path/to/docs-ros
 
 | 仓库 | SVG |
 | --- | --- |
-| manipulation | `docs/assets/architecture.svg` |
-| docs-ros | `zh/k3/05-机器人开发/5.2-运动控制/assets/manipulation-sdk-architecture.svg` |
+| manipulation | `docs/assets/architecture-layered.svg` |
+| docs-ros | `zh/k3/05-机器人开发/5.2-运动控制/assets/manipulation-sdk-architecture-layered.svg` |
 
 省略 `--docs-ros` 时只生成 SDK 图。同步只更新上述中文图，不修改英文文档。
 

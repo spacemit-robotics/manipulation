@@ -10,8 +10,8 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
-SDK_IMAGE = ROOT / "docs/assets/architecture.svg"
-ROS_IMAGE = Path("zh/k3/05-机器人开发/5.2-运动控制/assets/manipulation-sdk-architecture.svg")
+SDK_IMAGE = ROOT / "docs/assets/architecture-layered.svg"
+ROS_IMAGE = Path("zh/k3/05-机器人开发/5.2-运动控制/assets/manipulation-sdk-architecture-layered.svg")
 COLORS = {
     "entry": ("#3d6fb6", "#f2f6fc"),
     "control": ("#6a55b5", "#f5f2fb"),
