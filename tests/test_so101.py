@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,11 @@ CALIBRATE = ROOT / "drivers/arms/so101/tools/calibrate.py"
 SPEC = importlib.util.spec_from_file_location("so101_calibration", CALIBRATE)
 calibration = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(calibration)
+OPERATOR_SPEC = importlib.util.spec_from_file_location(
+    "spacemit_manipulation.operator_cli", ROOT / "capabilities/diagnostics/cli/operator_cli.py"
+)
+operator_cli = importlib.util.module_from_spec(OPERATOR_SPEC)
+OPERATOR_SPEC.loader.exec_module(operator_cli)
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
 
 
@@ -192,6 +198,28 @@ class So101Tests(unittest.TestCase):
         self.assertTrue(self.bus.requests)
         self.assertTrue(all(instruction == 2 for _, instruction, _ in self.bus.requests))
         self.assertEqual(self.bus.writes, [])
+
+    def test_joint_step_reports_device_timeout_after_a_partial_move(self):
+        self.gripper()
+        self.plan["device"]["arm"]["timeout_s"] = 10
+        self.save()
+        # The joint moves, then remains still outside the arrival tolerance. The CLI must allow
+        # the device deadline and confirmed hold to finish, retaining the structured result.
+        self.bus.stall[1] = 2055
+        context = SimpleNamespace(
+            plan=lambda unused: self.filename,
+            binary=lambda unused: CLI,
+            describe=lambda unused: json.loads(self.call("describe").stdout),
+        )
+        args = SimpleNamespace(
+            operation="joint-step", plan=None, joint="shoulder_pan", delta=0.05, speed=0.2
+        )
+        with self.assertRaisesRegex(DeviceCommandError, "point deadline exceeded") as failure:
+            operator_cli.joint_move(context, args)
+        self.assertEqual(failure.exception.result["status"], "timed_out")
+        self.assertEqual(int.from_bytes(self.bus.registers[1][56:58], "little"), 2055)
+        self.assertTrue(self.bus.writes)
+        self.assertTrue(all(address == 42 for _, address, _ in self.bus.writes))
 
     def test_missing_arm_calibration_allows_inspect_but_rejects_enable_and_move(self):
         del self.plan["device"]["options"]["arm_calibration"]

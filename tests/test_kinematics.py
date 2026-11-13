@@ -9,7 +9,9 @@ import math
 from pathlib import Path
 import random
 import sys
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, call, patch
 
 import numpy as np
 
@@ -33,6 +35,9 @@ module(
 operator_cli = module(
     "spacemit_manipulation.operator_cli", "capabilities/diagnostics/cli/operator_cli.py"
 )
+client_module = module(
+    "spacemit_manipulation.client", "bindings/python/spacemit_manipulation/client.py"
+)
 
 
 def load(name):
@@ -54,6 +59,113 @@ class LineMoveDeadlineTests(unittest.TestCase):
         timeout = operator_cli.path_timeout([0.0, 0.0], waypoints, 0.2, 0.5, 10)
         self.assertAlmostEqual(timeout, 11.25 + 10 + 5)
         self.assertEqual(operator_cli.path_timeout([0.0], [[100.0]], 0.2, 0.5, 10), 180)
+
+
+class PointMoveDeadlineTests(unittest.TestCase):
+    def setUp(self):
+        self.description = {
+            "joints": ["shoulder_pan", "shoulder_lift"],
+            "joint_limits_rad": [[-2, 2], [-2, 2]],
+            "arm_timeout_s": 10,
+        }
+        self.context = SimpleNamespace(
+            plan=Mock(return_value=Path("device.yaml")),
+            describe=Mock(return_value=self.description),
+            binary=Mock(return_value=Path("manipulation-device")),
+        )
+        client_patch = patch.object(client_module, "DeviceClient")
+        self.factory = client_patch.start()
+        self.addCleanup(client_patch.stop)
+        self.client = self.factory.return_value.__enter__.return_value
+        self.client.state.return_value = {"joints_rad": [0.0, 0.0]}
+        self.client.capabilities.return_value = {"arm": {"joint_path": False}}
+        print_patch = patch("builtins.print")
+        print_patch.start()
+        self.addCleanup(print_patch.stop)
+
+    def args(self, operation):
+        return SimpleNamespace(
+            operation=operation, plan=None, joint="shoulder_pan", delta=0.05,
+            positions=[0.1, 0.2], speed=0.2, x=0.1, y=0.0, z=0.2,
+            rpy=None, orientation_weight=None, seed_pose=None, step_mm=5,
+            path_velocity=0.2, path_acceleration=0.5,
+        )
+
+    def test_joint_commands_reserve_time_after_the_device_deadline(self):
+        for configured, expected in ((0.2, 10), (10, 15), (30, 35), (175, 180)):
+            with self.subTest(arm_timeout_s=configured):
+                self.description["arm_timeout_s"] = configured
+                operator_cli.joint_move(self.context, self.args("joint-step"))
+                self.client.jog_arm.assert_called_with(0, 0.05, 0.2, timeout=expected)
+                operator_cli.joint_move(self.context, self.args("joint-move"))
+                self.client.move_arm.assert_called_with([0.1, 0.2], 0.2, timeout=expected)
+
+    def test_joint_budget_over_client_limit_is_rejected_before_connecting(self):
+        self.description["arm_timeout_s"] = 176
+        for operation in ("joint-step", "joint-move"):
+            with self.subTest(operation=operation):
+                with self.assertRaisesRegex(ValueError, "180 s"):
+                    operator_cli.joint_move(self.context, self.args(operation))
+        self.factory.assert_not_called()
+
+    def test_pose_move_uses_the_same_device_deadline_budget(self):
+        with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
+            ik, "solve", return_value={"converged": True, "joints_rad": [0.1, 0.2]}
+        ):
+            operator_cli.kinematics(self.context, self.args("pose-move"))
+        self.client.move_arm.assert_called_once_with([0.1, 0.2], 0.2, timeout=15)
+
+    def test_line_point_fallback_keeps_handoff_and_final_arrival(self):
+        with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
+            ik, "line", return_value=[[0.01, 0.0], [0.02, 0.0]]
+        ):
+            operator_cli.kinematics(self.context, self.args("line-move"))
+        self.assertEqual(self.client.move_arm.call_args_list, [
+            call([0.01, 0.0], 0.2, wait_for_arrival=False, timeout=15),
+            call([0.02, 0.0], 0.2, timeout=15),
+        ])
+
+    def test_pose_budget_over_client_limit_is_rejected_before_connecting(self):
+        self.description["arm_timeout_s"] = 176
+        with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
+            ik, "solve", return_value={"converged": True, "joints_rad": [0.1, 0.2]}
+        ):
+            with self.assertRaisesRegex(ValueError, "180 s"):
+                operator_cli.kinematics(self.context, self.args("pose-move"))
+        self.factory.assert_not_called()
+
+    def test_line_point_budget_is_checked_before_the_first_waypoint(self):
+        self.description["arm_timeout_s"] = 176
+        with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
+            ik, "line", return_value=[[0.01, 0.0], [0.02, 0.0]]
+        ):
+            with self.assertRaisesRegex(ValueError, "180 s"):
+                operator_cli.kinematics(self.context, self.args("line-move"))
+        self.client.move_arm.assert_not_called()
+
+    def test_ik_remains_read_only_with_a_long_device_timeout(self):
+        self.description["arm_timeout_s"] = 300
+        with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
+            ik, "solve", return_value={"converged": True, "joints_rad": [0.1, 0.2]}
+        ):
+            operator_cli.kinematics(self.context, self.args("ik"))
+        self.factory.assert_called_once_with(
+            Path("manipulation-device"), Path("device.yaml"), allow_motion=False
+        )
+        self.client.move_arm.assert_not_called()
+
+    def test_continuous_line_keeps_its_existing_profile_budget(self):
+        self.description["arm_timeout_s"] = 176
+        self.client.capabilities.return_value = {"arm": {"joint_path": True}}
+        waypoints = [[0.01, 0.0], [0.02, 0.0]]
+        with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
+            ik, "line", return_value=waypoints
+        ):
+            operator_cli.kinematics(self.context, self.args("line-move"))
+        self.client.move_arm_path.assert_called_once_with(
+            waypoints, 0.2, 0.2, 0.5, timeout=180
+        )
+        self.client.move_arm.assert_not_called()
 
 
 class KinematicsTests(unittest.TestCase):

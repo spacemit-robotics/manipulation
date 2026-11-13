@@ -359,6 +359,10 @@ steps: []
 | `hand-eye promote` / `export` / `restore NAME` | 分别生成 `active.json`、`extrinsic.json`、`restored.json` |
 | `hand-eye export-perceptive NAME` | 从 `active.json` 新建抓取外参片段；必填 `--installation-id ID`、`--output FILE`；`--camera-type realsense\|spacemit_las2`（默认 `realsense`） |
 
+`joint-step`、`joint-move`、`pose-move` 和 `line-move` 的逐点执行，为每个点位请求在机械臂
+`timeout_s` 之外预留 5 秒，用于反馈读取与停止确认；请求期限最少为 10 秒。设备动作仍按原
+`timeout_s` 超时。受单次请求 180 秒上限约束，这些点位命令要求 `arm.timeout_s` 不超过 175 秒。
+
 `hand-eye collect` 的 `--option` 可重复：
 
 | 选项 | 含义 |

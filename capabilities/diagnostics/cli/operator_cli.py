@@ -185,6 +185,17 @@ def check_duration(state, target, speed, timeout_s):
         )
 
 
+def point_timeout(arm_timeout_s):
+    """Leave time for feedback reads and stop confirmation after the device motion deadline."""
+    timeout = max(10.0, arm_timeout_s + 5.0)
+    if timeout > 180:
+        raise ValueError(
+            "point commands require arm timeout_s <= 175 s to reserve feedback and stop "
+            "confirmation time within the 180 s request limit; nothing moved"
+        )
+    return timeout
+
+
 def path_timeout(start, waypoints, velocity, acceleration, arm_timeout_s):
     """Client deadline of a joint path: its profile duration, as the device computes it, plus the
     arm timeout and a margin; at most the client limit of 180 s."""
@@ -224,6 +235,7 @@ def kinematics(context, args):
     )
     described = context.describe(plan)
     limits = described["joint_limits_rad"]
+    timeout = point_timeout(described["arm_timeout_s"]) if args.operation == "pose-move" else None
     if args.operation == "ik" and args.seed_pose:  # Offline: the seed comes from a saved pose.
         seed = json.loads(context.device_file(plan, args.seed_pose).read_text(encoding="utf-8"))[
             "state"
@@ -268,9 +280,10 @@ def kinematics(context, args):
                     previous = chunk[-1]
                 print(result)
             else:  # Point moves only: hand over within tolerance, stop at the last waypoint.
+                timeout = point_timeout(described["arm_timeout_s"])
                 for waypoint in waypoints[:-1]:
-                    client.move_arm(waypoint, args.speed, wait_for_arrival=False)
-                print(client.move_arm(waypoints[-1], args.speed))
+                    client.move_arm(waypoint, args.speed, wait_for_arrival=False, timeout=timeout)
+                print(client.move_arm(waypoints[-1], args.speed, timeout=timeout))
             return
         result = solve(model, target, current, orientation_weight=weight, limits=limits)
         print(json.dumps(result), flush=True)
@@ -280,7 +293,7 @@ def kinematics(context, args):
             )
         if args.operation == "pose-move":
             check_duration(state, result["joints_rad"], args.speed, described["arm_timeout_s"])
-            print(client.move_arm(result["joints_rad"], args.speed))
+            print(client.move_arm(result["joints_rad"], args.speed, timeout=timeout))
 
 
 def device_action(context, args):
@@ -308,7 +321,8 @@ def joint_move(context, args):
     from .client import DeviceClient
 
     plan = context.plan(args.plan)
-    joints = context.describe(plan)["joints"]
+    described = context.describe(plan)
+    joints = described["joints"]
     if args.operation == "joint-step":
         index = (
             joints.index(args.joint)
@@ -321,11 +335,12 @@ def joint_move(context, args):
         raise ValueError(
             f"give {len(joints)} joint positions in radians, in order: {' '.join(joints)}"
         )
+    timeout = point_timeout(described["arm_timeout_s"])
     with DeviceClient(context.binary("manipulation-device"), plan) as client:
         if args.operation == "joint-step":
-            result = client.jog_arm(index, args.delta, args.speed)
+            result = client.jog_arm(index, args.delta, args.speed, timeout=timeout)
         else:
-            result = client.move_arm(args.positions, args.speed)
+            result = client.move_arm(args.positions, args.speed, timeout=timeout)
         print(result, flush=True)
 
 
