@@ -442,6 +442,7 @@ manipulation/
 │   ├── kinematics/         # 正逆运动学
 │   ├── calibration/        # 姿态采集与手眼标定
 │   └── simulation/         # 仿真服务、可视化与远程相机工具
+├── simulation/mujoco/      # 物理世界、快照、RGB-D 相机与窗口
 ├── bindings/python/        # Python 客户端 DeviceClient
 ├── descriptions/           # 模型与配置
 │   ├── robots/             # 机型描述：URDF、model.json、配置模板
