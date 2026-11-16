@@ -225,8 +225,8 @@ manipulation hand-move 1 1 0.7 1 1 1
 - **只读命令**：`inspect` 读取状态，`teach` 记录静止姿态，均不运动。
 - **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出位置，默认执行 2 s。
   - 位置 `0` 为闭合、`1` 为张开，所有末端执行器相同；
-  - Revo2 没有位置反馈，结果为 `unverified`，表示指令已下发并等待执行时间结束，但未测量是否到位；
-  - 起始位置未知，即使目标变化很小，手指也可能大幅动作。
+  - Revo2 默认配置不读取位置反馈，按 `--duration` 等待后返回 `unverified`，表示指令已下发，但未测量是否到位；此模式不支持 `hand-step`，Revo2 不支持 `hand-grasp`；
+  - 起始位置未知，即使目标变化很小，手指也可能大幅动作；单次执行时长不超过 2.55 s。
 
 机械臂须按厂商规程使能并处于位置模式。现场须有人看护，急停按钮伸手可及。
 Nero 失能或断电后会坍塌，不能用失能或断电代替软件停止。
@@ -278,16 +278,41 @@ manipulation pose-move 0.20 0.00 0.15 --speed 0.2   # 末端移到基座坐标 (
 manipulation line-move 0.20 0.05 0.15 --speed 0.2   # 末端沿直线移动
 ```
 
+SO101 的单次动作按以下方式执行：
+
+| 命令 | 目标与完成条件 |
+| --- | --- |
+| `joint-step JOINT DELTA` | 相对当前反馈移动选中关节，单位 rad；只更新该舵机目标，其余保持；选中关节到位且全臂静止后完成 |
+| `joint-move Q1 Q2 Q3 Q4 Q5` | 按配置顺序给出五个绝对角度，单位 rad；全部关节到位且全臂静止后完成 |
+| `hand-move V` | 夹爪绝对位置，`0` 闭合、`1` 张开；`--duration` 默认 2 s |
+| `hand-step gripper DELTA` | 根据位置反馈计算 `±0.01` 的目标，执行时长 1 s |
+| `hand-grasp` | 默认闭合到 `0`，`--duration` 默认 1 s；报告到位或有效夹持 |
+
+到位或夹持须由连续三个新鲜反馈样本确认，满足条件即返回。静止但超出目标容差仍属未到位。
+Nero 等未提供原生单关节点位的驱动，`joint-step` 从当前反馈生成整组目标并按整组判定到位。
+多通道末端的 `hand-step` 也发送整组目标，其余通道取当前反馈；它要求位置反馈。
+
 - **监控与示教**：`monitor` 只读；释放扭矩时可手动拖动机械臂观察读数，再用 `teach` 记录姿态。中位姿态下各关节应接近 0°。
-- **单关节步进**：`joint-step` 只更新选中舵机的目标，保留其他关节已有目标。选中关节在配置容差内且全臂静止后返回；`joint-move` 仍要求整组关节到位。
 - **抓握判断**：
-  - 夹爪闭合途中受阻停止，且负载不低于 `grip_load_threshold`（默认为额定输出的 10%）：结果为 `effector_grasp_holding`；
-  - 夹爪完全闭合：未夹住物体；
+  - 夹爪向闭合方向运动，停在目标外且负载绝对值不低于 `grip_load_threshold`（默认为额定输出的 10%）：结果为 `effector_grasp_holding`；
+  - 到达闭合目标：结果为 `effector_position_reached`，`physical_grip_verified` 为 `false`；
+  - 张开或目标不变时的超调、负载不能作为夹持证据；
   - 负载判断不是力觉测量，首次抓取新物体时须在旁观察。
 - **夹爪使能与保持**：夹爪须先由 `so101-calibrate configure` 设置扭矩保护，否则拒绝使能。夹住物体后执行 `hand-hold` 不会松开。
-- **速度与超时**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`joint-move` 和 `pose-move` 按控制器速度上限估算进入到位容差的最短时长，超过 `timeout_s` 时在运动前拒绝。末端命令按 `effector.timeout_s` 等待，并为结果读取与停止确认预留请求时间。
+- **执行中失能**：末端反馈明确失去扭矩时，中断动作并尝试保持；无法确认停止时返回 `stop_unknown` 并锁定会话。
+- **速度预检**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`joint-move` 和 `pose-move` 按控制器速度上限与到位容差估算最短时长，超过 `arm.timeout_s` 时在下发前拒绝。
 - **逆运动学**：五轴机械臂默认只求解位置，加 `--rpy R P Y` 时同时求解姿态。不收敛时不运动；只检查关节限位，不检查碰撞。
 - **直线运动**：`line-move` 按 5 mm 间隔逐点求解，任一路点不可达时拒绝整条路径。SO101 不支持连续路径和定时轨迹。
+
+单次动作的命令行请求期限为：
+
+| 命令 | 请求期限（s） |
+| --- | --- |
+| `joint-step`、`joint-move`、`pose-move`、`line-move` 逐点执行 | `max(10, arm.timeout_s + 5)`；`arm.timeout_s` 须不超过 175 s |
+| `hand-move`、`hand-step`、`hand-grasp` | `max(10, effector.timeout_s + 5)` |
+
+设备仍按配置的动作期限执行；额外时间用于读取结果和确认停止，动作完成即可返回。
+真正超时仍报告失败并执行停止确认，不自动重放。Python `DeviceClient` 的 `timeout` 由调用者设置，默认 10 s，详见[接口参考](docs/reference.md)。
 
 ## 6. 手眼标定
 

@@ -263,11 +263,13 @@ steps: []
   - 夹爪保存 `motor_id`、`open_ticks`、`closed_ticks` 和 `homing_offset`；
   - 夹爪文件可省略 `homing_offset`，此时驱动不核对夹爪偏移，该文件只能用于偏移未改变的安装。
 - **抓握判断**（能力 `grasp_detection`）：
-  - 闭合目标未到达、夹爪静止，且负载绝对值不低于 `grip_load_threshold` 时，`effector_holding` 为 `true`；
+  - 下发目标对应实际闭合方向、闭合目标未到达、夹爪静止，且负载绝对值不低于 `grip_load_threshold` 时，`effector_holding` 为 `true`；
   - 连续三个这样的样本使动作以 `effector_grasp_holding` 成功结束；
+  - 张开超调、目标不变时的漂移或单独的负载读数不构成夹持证据；
   - 夹住时舵机的过载保护标志（状态位 5）不算故障；
   - `hand-hold` 保持原闭合目标。
 - 使能夹爪前，核对最大扭矩不高于 500、保护电流不高于 250 mA。
+- 动作中反馈明确失去扭矩时中断并尝试保持；无法确认停止时返回 `stop_unknown` 并锁定会话。
 - 不支持连续路径、定时轨迹或力控。
 
 ### 配置模板
@@ -347,7 +349,7 @@ steps: []
 | `joint-step JOINT DELTA` / `joint-move Q...` | 单关节相对 / 全部关节绝对点位，单位 rad；`JOINT` 为关节名或从 0 开始的序号；`--speed`（默认 0.05） |
 | `arm-check` | 同 `manipulation-device arm-check`，会运动 |
 | `hand-move V...` | 每个通道一个绝对位置（`0` 闭合，`1` 张开）；`--duration S`（默认 2） |
-| `hand-step CHANNEL DELTA` | 单通道 `±0.01`，仅限有位置反馈的末端 |
+| `hand-step CHANNEL DELTA` | 选中通道 `±0.01`，执行时长 1 s；仅限有位置反馈的末端 |
 | `hand-grasp` | 闭合到夹住或完全闭合，仅限声明 `grasp_detection` 的末端；`--positions V...`（默认全 0）、`--duration S`（默认 1） |
 | `teach FILE` / `fk FILE` | 记录静止姿态 / 姿态文件的正运动学；文件相对设备配置所在目录，`teach` 不覆盖 |
 | `pose` | 只读当前末端位姿：`position_m`、`rpy_rad`（URDF 横滚、俯仰、偏航） |
@@ -360,16 +362,19 @@ steps: []
 | `hand-eye promote` / `export` / `restore NAME` | 分别生成 `active.json`、`extrinsic.json`、`restored.json` |
 | `hand-eye export-perceptive NAME` | 从 `active.json` 新建抓取外参片段；必填 `--installation-id ID`、`--output FILE`；`--camera-type realsense\|spacemit_las2`（默认 `realsense`） |
 
-`joint-step`、`joint-move`、`pose-move` 和 `line-move` 的逐点执行，为每个点位请求在机械臂
-`timeout_s` 之外预留 5 秒，用于反馈读取与停止确认；请求期限最少为 10 秒。设备动作仍按原
-`timeout_s` 超时。受单次请求 180 秒上限约束，这些点位命令要求 `arm.timeout_s` 不超过 175 秒。
+`joint-step` 从新鲜位置反馈计算相对目标。SO101 只更新选中关节并保留其他舵机目标；未声明
+`single_joint_point` 的驱动从全臂反馈生成整组目标，按整组点位执行。`hand-step` 下发完整末端
+目标向量，选中通道增减 `0.01`，其他通道取本次反馈位置。
 
-`joint-move` 和 `pose-move` 在驱动提供关节速度上限时，估算进入配置容差的最短时长；超过
-`arm.timeout_s` 的目标在下发前拒绝。整组点位仍须全部关节到位，仅静止不代表完成。
+| 命令 | 请求期限（s） |
+| --- | --- |
+| `joint-step`、`joint-move`、`pose-move`、`line-move` 逐点执行 | `max(10, arm.timeout_s + 5)` |
+| `hand-move`、`hand-step`、`hand-grasp` | `max(10, effector.timeout_s + 5)` |
 
-`hand-move`、`hand-step` 和 `hand-grasp` 的请求期限为 `max(10, effector.timeout_s + 5)` 秒。
-末端动作仍受配置期限约束；有反馈时等待到位或有效夹持证据，无反馈时等待指定动作时长后返回
-`unverified`。等待期间失去已知的使能状态会中断动作并进入停止确认。
+- **请求预算**：在动作期限之外至少预留 5 秒用于反馈读取与停止确认，满足完成条件即返回。设备仍按配置的动作期限超时。单次请求最长 180 s，表中的机械臂点位命令要求 `arm.timeout_s ≤ 175 s`。
+- **时长预检**：驱动提供关节速度上限时，`joint-move` 和 `pose-move` 按实测位置、速度上限和配置到位容差估算最短时长；超过 `arm.timeout_s` 的目标在下发前拒绝。
+- **整组到位**：`joint-move` 须全部关节在目标容差内且全臂静止，并由连续三个新鲜反馈确认；仅静止不代表完成。
+- **末端完成**：有位置反馈时等待到位或有效夹持证据，无反馈时等待指定动作时长后返回 `unverified`。等待期间失去已知的使能状态会中断动作并进入停止确认。
 
 `hand-eye collect` 的 `--option` 可重复：
 
@@ -526,13 +531,16 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 | `close()` | 关闭会话；也可使用 `with` |
 
 - 每个方法接受 `timeout`（秒，默认 10，最长 180，含排队时间）和 `is_cancelled`（回调）。
+- Python 请求期限由调用者设置，与设备动作期限独立；需要覆盖动作期限、反馈读取和停止确认时间，命令行的自动预算不会应用到直接 API 调用。
 - 运动未成功时抛出 `DeviceCommandError`：`result` 为含 `status` 的字典；设备进程拒绝请求时为错误字符串，此时 `rejected` 表示请求在写入设备前被拒绝，`latched` 表示会话已锁定、须重新连接。
 
 ### 完成条件
 
 | 用法 | 返回时机 | `detail` 开头 |
 | --- | --- | --- |
-| 默认 | 连续三个新鲜反馈各关节在容差内且静止 | `target_reached` |
+| 整组点位（默认） | 连续三个新鲜反馈全部关节在容差内且全臂静止 | `target_reached` |
+| SO101 `jog_arm` | 只更新选中关节；连续三个新鲜反馈选中关节在容差内且全臂静止 | `target_reached` |
+| 有位置反馈的末端 | 连续三个新鲜反馈全部通道在容差内且静止 | `effector_position_reached` |
 | `move_arm(..., wait_for_arrival=False)` | 连续两个新鲜反馈在容差内，不等静止 | `within_tolerance` |
 | `move_arm_trajectory(..., wait_for_arrival=False)` | 最后一个点已发送，机械臂可能仍在收尾 | `delivered` |
 | 无反馈末端，或带 `effector_schedule` | 已下发并等完执行时间；结果 `unverified`，须 `allow_unverified=True` | — |
