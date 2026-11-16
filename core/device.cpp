@@ -679,6 +679,8 @@ CommandResult DeviceSession::MoveEffector(
             }
             const auto state = ReadEffector();
             Check(!state.fault && state.sample_id >= last, "effector fault/sequence regression");
+            Check(!state.enabled.has_value() || *state.enabled,
+                    "effector disabled during motion");
             if (!open_loop && state.sample_id > last && state.received_at > submitted) {
                 last = state.sample_id;
                 bool reached = !state.moving && !state.command_active;

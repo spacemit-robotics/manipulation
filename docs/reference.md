@@ -289,7 +289,7 @@ steps: []
 | `drivers` | 列出已注册驱动 |
 | `driver-roles` | 分别列出已注册机械臂与末端驱动，不连接设备 |
 | `validate PLAN` | 离线校验配置，不导入厂商 SDK |
-| `describe PLAN` | 输出驱动、型号、关节名与限位、机械臂 `timeout_s`、通道名（JSON），不连接设备 |
+| `describe PLAN` | 输出驱动、型号、关节名与限位、机械臂容差、机械臂与末端 `timeout_s`、通道名（JSON），不连接设备 |
 | `capabilities PLAN` | 离线查询驱动能力，以及 `registered` 列表中的能力 `id`、`supported`、`reason`、`description` |
 | `inspect PLAN` | 获取独占、连接、诊断并输出状态 |
 | `run PLAN [--enable]` | 执行 `steps`；`--enable` 先显式使能；`unverified` 步骤不中断序列 |
@@ -363,6 +363,13 @@ steps: []
 `joint-step`、`joint-move`、`pose-move` 和 `line-move` 的逐点执行，为每个点位请求在机械臂
 `timeout_s` 之外预留 5 秒，用于反馈读取与停止确认；请求期限最少为 10 秒。设备动作仍按原
 `timeout_s` 超时。受单次请求 180 秒上限约束，这些点位命令要求 `arm.timeout_s` 不超过 175 秒。
+
+`joint-move` 和 `pose-move` 在驱动提供关节速度上限时，估算进入配置容差的最短时长；超过
+`arm.timeout_s` 的目标在下发前拒绝。整组点位仍须全部关节到位，仅静止不代表完成。
+
+`hand-move`、`hand-step` 和 `hand-grasp` 的请求期限为 `max(10, effector.timeout_s + 5)` 秒。
+末端动作仍受配置期限约束；有反馈时等待到位或有效夹持证据，无反馈时等待指定动作时长后返回
+`unverified`。等待期间失去已知的使能状态会中断动作并进入停止确认。
 
 `hand-eye collect` 的 `--option` 可重复：
 

@@ -57,6 +57,7 @@ class ServoBus:
         self.drop_goals = False
         self.stall = {}  # motor ID -> encoder position where an object blocks a goal
         self.goal_bias = {}  # motor ID -> stable position error under load, in encoder ticks
+        self.disable_on_goal = set()  # motor IDs that lose torque after a target is accepted
         self.response_delay = 0
         self.done = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -102,6 +103,8 @@ class ServoBus:
                                 else stop
                             )
                             self.word(motor_id, 56, position)
+                            if motor_id in self.disable_on_goal:
+                                self.registers[motor_id][40] = 0
                     payload = b""
                 elif instruction == 2:
                     address, width = parameters
@@ -258,6 +261,18 @@ class So101Tests(unittest.TestCase):
                 client.jog_arm(0, 0.05, 0.2)
             self.assertEqual(failure.exception.result["status"], "timed_out")
             self.assertTrue(client.state()["latched"])
+
+    def test_joint_move_still_checks_arrival_on_every_joint(self):
+        self.plan["device"]["arm"]["timeout_s"] = 0.1
+        self.save()
+        self.bus.goal_bias[3] = 9
+        with self.client() as client:
+            with self.assertRaises(DeviceCommandError) as failure:
+                client.move_arm([0.05] * 5, 0.2)
+            self.assertIsInstance(failure.exception.result, dict)
+            self.assertEqual(failure.exception.result["status"], "timed_out")
+            self.assertTrue(client.state()["latched"])
+        self.assertEqual({motor_id for motor_id, _, _ in self.bus.writes}, set(range(1, 6)))
 
     def test_joint_step_rejects_unsafe_inputs_and_other_joint_state_without_writes(self):
         with self.client() as client:
@@ -565,6 +580,90 @@ class So101Tests(unittest.TestCase):
             with self.assertRaises(DeviceCommandError) as raised:
                 client.move_effector([0])
             self.assertIn(raised.exception.result["status"], ("timed_out", "stop_unknown"))
+
+    def test_hand_move_reports_device_timeout_after_a_stalled_move(self):
+        self.gripper()
+        self.plan["device"]["effector"]["timeout_s"] = 10
+        self.save()
+        self.bus.stall[6] = 2600
+        context = SimpleNamespace(
+            plan=lambda unused: self.filename,
+            binary=lambda unused: CLI,
+            describe=lambda unused: json.loads(self.call("describe").stdout),
+        )
+        args = SimpleNamespace(plan=None, positions=[1.0], duration=0.05)
+        with self.assertRaises(DeviceCommandError) as failure:
+            operator_cli.hand_move(context, args)
+        self.assertIsInstance(failure.exception.result, dict)
+        self.assertEqual(failure.exception.result["status"], "timed_out")
+        self.assertTrue(self.bus.writes)
+        self.assertTrue(all((motor_id, address) == (6, 42) for motor_id, address, _ in self.bus.writes))
+
+    def test_gripper_opening_or_unchanged_target_cannot_report_a_grasp(self):
+        self.gripper()
+        self.plan["device"]["effector"]["timeout_s"] = 0.15
+        for closed, opened in ((2031, 3468), (3468, 2031)):
+            self.gripper_calibration.update(closed_ticks=closed, open_ticks=opened)
+            self.save()
+            span = opened - closed
+            for opening in (False, True):
+                with self.subTest(closed=closed, opening=opening):
+                    self.bus.goal_bias.clear()
+                    self.bus.word(6, 56, 2750)
+                    self.bus.word(6, 60, 300)
+                    with self.client() as client:
+                        # An opening overshoot, or drift after an unchanged goal, is not closing.
+                        # 0.5 rounds to the current encoder tick in either calibration direction.
+                        self.bus.goal_bias[6] = 60 if span > 0 else -60
+                        with self.assertRaises(DeviceCommandError) as failure:
+                            client.move_effector([0.7 if opening else 0.5], duration_s=0.05)
+                        self.assertEqual(failure.exception.result["status"], "timed_out")
+                        self.assertFalse(failure.exception.result["physical_grip_verified"])
+                        self.assertFalse(client.state()["effector_holding"])
+
+    def test_gripper_closing_grip_then_opening_replaces_direction_in_both_calibrations(self):
+        self.gripper()
+        self.plan["device"]["effector"]["timeout_s"] = 0.15
+        for closed, opened in ((2031, 3468), (3468, 2031)):
+            with self.subTest(closed=closed):
+                self.gripper_calibration.update(closed_ticks=closed, open_ticks=opened)
+                self.save()
+                span = opened - closed
+                self.bus.word(6, 56, 2750)
+                self.bus.word(6, 60, 300)
+                self.bus.stall[6] = round(closed + 0.3 * span)
+                with self.client() as client:
+                    result = client.move_effector([0], duration_s=0.05)
+                    self.assertEqual(result["detail"], "effector_grasp_holding")
+                    self.assertTrue(result["physical_grip_verified"])
+                    goals = len(self.bus.writes)
+                    self.assertEqual(client.hold_effector()["status"], "succeeded")
+                    self.assertEqual(len(self.bus.writes), goals, "holding rewrote the grasp goal")
+                    # Opening is blocked at the old position under load: never a closing grip.
+                    with self.assertRaises(DeviceCommandError) as failure:
+                        client.move_effector([1], duration_s=0.05)
+                    self.assertEqual(failure.exception.result["status"], "timed_out")
+                    self.assertFalse(client.state()["effector_holding"])
+                self.bus.stall.clear()
+
+    def test_gripper_torque_loss_after_submission_faults_before_arrival_or_timeout(self):
+        self.gripper()
+        for stalled in (False, True):
+            with self.subTest(stalled=stalled):
+                self.bus.registers[6][40] = 1
+                self.bus.word(6, 56, 2750)
+                self.bus.stall = {6: 2750} if stalled else {}
+                self.bus.disable_on_goal.add(6)
+                with self.client() as client:
+                    started = time.monotonic()
+                    with self.assertRaises(DeviceCommandError) as failure:
+                        client.move_effector([0.7], duration_s=0.05)
+                    self.assertLess(time.monotonic() - started, 1.0)
+                    self.assertEqual(failure.exception.result["status"], "stop_unknown")
+                    self.assertIn("disabled", failure.exception.result["detail"])
+                    state = client.state()
+                    self.assertFalse(state["effector_enabled"])
+                    self.assertTrue(state["latched"])
 
     def test_unconfigured_gripper_protection_refuses_enable_without_writes(self):
         self.gripper()

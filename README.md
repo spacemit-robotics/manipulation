@@ -285,7 +285,7 @@ manipulation line-move 0.20 0.05 0.15 --speed 0.2   # 末端沿直线移动
   - 夹爪完全闭合：未夹住物体；
   - 负载判断不是力觉测量，首次抓取新物体时须在旁观察。
 - **夹爪使能与保持**：夹爪须先由 `so101-calibrate configure` 设置扭矩保护，否则拒绝使能。夹住物体后执行 `hand-hold` 不会松开。
-- **速度与超时**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`pose-move` 估算的时长超过 `timeout_s` 时，在运动前拒绝。
+- **速度与超时**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`joint-move` 和 `pose-move` 按控制器速度上限估算进入到位容差的最短时长，超过 `timeout_s` 时在运动前拒绝。末端命令按 `effector.timeout_s` 等待，并为结果读取与停止确认预留请求时间。
 - **逆运动学**：五轴机械臂默认只求解位置，加 `--rpy R P Y` 时同时求解姿态。不收敛时不运动；只检查关节限位，不检查碰撞。
 - **直线运动**：`line-move` 按 5 mm 间隔逐点求解，任一路点不可达时拒绝整条路径。SO101 不支持连续路径和定时轨迹。
 

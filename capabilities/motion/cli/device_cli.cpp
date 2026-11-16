@@ -122,6 +122,8 @@ int main(int argc, char** argv) {
                 std::cout << ',' << joint.maximum_rad << ']';
             }
             std::cout << "],\"arm_timeout_s\":" << plan.definition.arm.timeout_s;
+            std::cout << ",\"arm_tolerance_rad\":" << plan.definition.arm.tolerance_rad;
+            std::cout << ",\"effector_timeout_s\":" << plan.definition.effector.timeout_s;
             std::cout << ",\"channels\":[";
             for (std::size_t i = 0; i < plan.definition.effector.channels.size(); ++i) {
                 std::cout << (i ? "," : "") << JsonString(plan.definition.effector.channels[i]);

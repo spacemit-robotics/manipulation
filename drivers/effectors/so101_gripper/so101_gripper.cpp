@@ -26,6 +26,8 @@ public:
         session_->Connect();
         connected_ = true;
         connected_offset_.reset();
+        target_.reset();
+        closing_ = holding_ = false;
         try {
             Read();
         } catch (...) {
@@ -37,6 +39,8 @@ public:
     void Disconnect() noexcept override {
         if (connected_) session_->Disconnect();
         connected_ = false;
+        target_.reset();
+        closing_ = holding_ = false;
     }
 
     EffectorState Read() override {
@@ -69,7 +73,7 @@ public:
         // Holding long enough trips overload protection, which only limits output to
         // Overload_Torque: expected while gripping an object. Every other servo error is a fault.
         const bool fault = (sample_.error & ~kOverloadError) != 0 || !sample_.position_mode;
-        holding_ = target_.has_value() && sample_.enabled && !sample_.moving &&
+        holding_ = closing_ && target_.has_value() && sample_.enabled && !sample_.moving &&
                 *target_ <
                         position - definition_.tolerance &&  // Stopped short of a closing target.
                 std::abs(sample_.load) >= settings.grip_load_threshold;
@@ -100,6 +104,7 @@ public:
             throw std::runtime_error("SO101 gripper moved while preparing enable");
         }
         target_ = prepared.positions[0];
+        closing_ = holding_ = false;
         session_->Torque({Id()}, true);
         const auto after = Read();
         if (after.enabled != true || after.fault)
@@ -109,6 +114,7 @@ public:
     void Disable() override {
         Read();
         target_.reset();
+        closing_ = holding_ = false;
         session_->Torque({Id()}, false);
         if (Read().enabled != false)
             throw std::runtime_error("SO101 gripper disable not confirmed");
@@ -133,6 +139,9 @@ public:
         const double speed =
                 std::min(settings.maximum_velocity, std::max(0.01, distance / point.duration_s));
         target_ = point.positions[0];
+        closing_ = settings.open_ticks > settings.closed_ticks
+                ? target < sample_.position
+                : target > sample_.position;
         session_->Target({Id()}, {target}, {speed});
     }
 
@@ -145,6 +154,7 @@ public:
             session_->Target({Id()}, {sample_.position},
                     {std::min(session_->Config().maximum_velocity, 0.05)});
             target_ = initial.positions[0];
+            closing_ = holding_ = false;
         }
         auto previous = initial.positions[0];
         size_t stationary = 0;
@@ -169,6 +179,7 @@ private:
     Sample sample_;
     std::optional<int> connected_offset_;
     std::optional<double> target_;  // Last commanded normalized position.
+    bool closing_ = false;  // Direction relative to measured position when the target was sent.
     bool holding_ = false;
     bool connected_ = false;
     uint64_t sample_id_ = 0;

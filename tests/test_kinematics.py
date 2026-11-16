@@ -67,6 +67,7 @@ class PointMoveDeadlineTests(unittest.TestCase):
             "joints": ["shoulder_pan", "shoulder_lift"],
             "joint_limits_rad": [[-2, 2], [-2, 2]],
             "arm_timeout_s": 10,
+            "arm_tolerance_rad": 0.01,
         }
         self.context = SimpleNamespace(
             plan=Mock(return_value=Path("device.yaml")),
@@ -107,6 +108,72 @@ class PointMoveDeadlineTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "180 s"):
                     operator_cli.joint_move(self.context, self.args(operation))
         self.factory.assert_not_called()
+
+    def test_joint_move_refuses_unreachable_duration_without_dispatching(self):
+        self.client.state.return_value = {
+            "joints_rad": [0.0, 0.0],
+            "controller_limits": [{"max_velocity_rad_s": 1.0}] * 2,
+        }
+        args = self.args("joint-move")
+        args.positions, args.speed = [1.5, 0.0], 0.05
+        with self.assertRaisesRegex(ValueError, "more than the arm timeout_s 10"):
+            operator_cli.joint_move(self.context, args)
+        self.client.move_arm.assert_not_called()
+        self.client.jog_arm.assert_not_called()
+
+    def test_joint_move_dispatches_reachable_duration_with_normal_deadline(self):
+        self.client.state.return_value = {
+            "joints_rad": [0.0, 0.0],
+            "controller_limits": [{"max_velocity_rad_s": 1.0}] * 2,
+        }
+        operator_cli.joint_move(self.context, self.args("joint-move"))
+        self.client.move_arm.assert_called_once_with([0.1, 0.2], 0.2, timeout=15)
+
+    def test_joint_move_duration_allows_reaching_the_configured_arrival_tolerance(self):
+        self.description["arm_timeout_s"] = 1
+        self.client.state.return_value = {
+            "joints_rad": [0.0, 0.0],
+            "controller_limits": [{"max_velocity_rad_s": 1.0}] * 2,
+        }
+        # The first target is already within tolerance. The second needs only 0.625 s to enter
+        # tolerance, although reaching either exact target would take longer than the deadline.
+        for position in (0.009, 0.011):
+            with self.subTest(position=position):
+                self.client.move_arm.reset_mock()
+                args = self.args("joint-move")
+                args.positions, args.speed = [position, 0.0], 0.0016
+                operator_cli.joint_move(self.context, args)
+                self.client.move_arm.assert_called_once_with(
+                    [position, 0.0], 0.0016, timeout=10
+                )
+
+    def test_joint_move_without_controller_limits_keeps_existing_dispatch(self):
+        for limits in (None, [], [{"max_velocity_rad_s": 1.0}]):
+            with self.subTest(controller_limits=limits):
+                state = {"joints_rad": [0.0, 0.0]}
+                if limits is not None:
+                    state["controller_limits"] = limits
+                self.client.state.return_value = state
+                self.client.move_arm.reset_mock()
+                args = self.args("joint-move")
+                args.positions, args.speed = [1.5, 0.0], 0.05
+                operator_cli.joint_move(self.context, args)
+                self.client.move_arm.assert_called_once_with([1.5, 0.0], 0.05, timeout=15)
+
+    def test_joint_move_rejects_invalid_speed_without_dispatching(self):
+        for limits in (None, [{"max_velocity_rad_s": 1.0}] * 2):
+            for speed in (0.0, -0.1, 1.01, math.nan, math.inf, -math.inf):
+                with self.subTest(controller_limits=limits, speed=speed):
+                    state = {"joints_rad": [0.0, 0.0]}
+                    if limits is not None:
+                        state["controller_limits"] = limits
+                    self.client.state.return_value = state
+                    args = self.args("joint-move")
+                    args.speed = speed
+                    with self.assertRaises(ValueError):
+                        operator_cli.joint_move(self.context, args)
+        self.client.move_arm.assert_not_called()
+        self.client.jog_arm.assert_not_called()
 
     def test_pose_move_uses_the_same_device_deadline_budget(self):
         with patch.object(operator_cli, "load_model", return_value=object()), patch.object(
