@@ -24,6 +24,7 @@ public:
         capabilities.enable = true;
         capabilities.disable = true;
         capabilities.verified_hold = true;
+        capabilities.single_joint_point = true;
         capabilities.minimum_speed_scale = kSpeedTickRadS / session_->Config().maximum_velocity;
         return capabilities;
     }
@@ -158,6 +159,30 @@ public:
         if (!state.enabled)
             throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
         session_->Target(Ids(), ticks, Velocities(point.speed_scale));
+    }
+
+    void SubmitJoint(std::size_t joint_index, double target_rad, double speed_scale) override {
+        RequireCalibration();
+        if (joint_index >= kArmJoints || !std::isfinite(speed_scale) || speed_scale <= 0 ||
+                speed_scale > 1) {
+            throw CommandRejected("SO101 requires a valid joint index and speed_scale in (0,1]");
+        }
+        if (speed_scale < GetCapabilities().minimum_speed_scale) {
+            throw CommandRejected("SO101 speed is below one encoder tick per second");
+        }
+        const int target = JointTicks(target_rad);
+        const auto outside = OutsideLimits(joint_index, target_rad, target);
+        if (!outside.empty()) throw CommandRejected("SO101 target outside limits: " + outside);
+        const auto state = Read();
+        if (!state.position_mode || state.fault) {
+            throw CommandRejected("SO101 requires fault-free position-mode feedback");
+        }
+        if (!state.enabled)
+            throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
+        const auto& settings = session_->Config();
+        // Other joints retain their controller goals, including the static error holding a load.
+        session_->Target({settings.ids[joint_index]}, {target},
+                {settings.maximum_velocity * speed_scale});
     }
 
     bool Hold() override {

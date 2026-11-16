@@ -141,6 +141,8 @@ struct ArmCapabilities {
     bool joint_trajectory = false;
     /// Supports Disable(), an explicit torque release never used by Hold().
     bool disable = false;
+    /// Supports a single-joint point without changing the other controller targets.
+    bool single_joint_point = false;
 };
 
 /**
@@ -177,6 +179,9 @@ public:
     virtual void Disable();
     /// Accept a point target; returns on acceptance, not completion.
     virtual void Submit(const JointPoint& point) = 0;
+    /// Accept one absolute joint target, preserving every other controller target. Default:
+    /// rejected without a write. Used for relative jogs when single_joint_point is declared.
+    virtual void SubmitJoint(std::size_t joint_index, double target_rad, double speed_scale);
     /// Accept a path; default: rejected, nothing written.
     virtual void SubmitPath(const JointPath& path);
     /// Accept a trajectory; default: rejected, nothing written.

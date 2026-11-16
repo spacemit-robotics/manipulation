@@ -213,6 +213,7 @@ steps: []
 - `positions` 按末端通道排列，每项 `[0,1]`；`duration_s` 大于 0，且不超过驱动与末端期限。
 - 路径和轨迹的范围、起点及到位条件与同名设备 API 一致。顺序轨迹不提供 `effector_schedule`，该组合仍通过直接 API 使用。
 - `joint_jog` 的最终目标由实时起点计算，下发前检查限位。
+- SO101 的 `joint_jog` / `joint-step` 只更新选中关节，保留其他舵机已有目标；选中关节到位且全臂静止后完成。`joint_point` / `joint-move` 仍按整组目标判定到位。
 - `unverified` 不等于到位；顺序任务保留该结果，失败或取消后不执行后续步骤。
 
 ### 末端反馈
@@ -480,7 +481,7 @@ JSON 格式；路径相对配置文件解析。`--config` 不能与 `--plan`、`
 | `GetArmCapabilities()` / `GetEffectorCapabilities()` | 查询驱动支持的操作 |
 | `EnableArm()` / `DisableArm()`、`EnableEffector()` / `DisableEffector()` | 显式使能 / 释放扭矩 |
 | `HoldArm()` / `HoldEffector()` | 保持停止，不卸力、不清除锁定 |
-| `JogArm(joint_index, delta_rad, speed_scale, cancelled)` | 基于当前位置的单关节相对点位 |
+| `JogArm(joint_index, delta_rad, speed_scale, cancelled)` | 基于当前位置的单关节相对点位；支持 `single_joint_point` 的驱动只更新选中关节，其余驱动使用整组点位执行 |
 | `MoveArm` / `MoveArmPath` / `MoveArmTrajectory` / `MoveEffector` | 阻塞执行并返回 `CommandResult`；`cancelled` 每 10 ms 调用一次 |
 | `FollowArm(point)` / `FollowEffector(point)` | 目标跟随：发出目标即返回，见 [§6 完成条件](#完成条件) |
 | `Latched()` | 是否处于锁定 |

@@ -492,6 +492,9 @@ CommandResult DeviceSession::JogArm(std::size_t joint_index, double delta_rad, d
     if (joint_index >= impl_->definition.arm.joints.size() || !std::isfinite(delta_rad)) {
         throw CommandRejected("invalid joint index or nonfinite step");
     }
+    if (impl_->arm->GetCapabilities().single_joint_point) {
+        return RunArm([&] { return impl_->arm->Jog(joint_index, delta_rad, speed_scale); }, cancelled);
+    }
     auto target = ReadArm().joints_rad;
     target[joint_index] += delta_rad;
     return MoveArm({target, speed_scale}, cancelled);

@@ -48,6 +48,7 @@ MuJoCo 角色驱动连接本地物理世界，或经 TCP 使用常驻仿真服�
 | `Enable` | 显式使能，仅在 `GetCapabilities().enable` 为真时调用 |
 | `Disable` | 显式释放扭矩，仅在 `disable` 能力为真时调用；不能作为停止的替代 |
 | `Submit` | 下发目标即返回，不等待完成；目标单位 rad，`speed_scale` 为控制器倍率。可能在运动中调用（接着未等到位的命令或目标跟随），是否允许由会话判断，驱动不因 `moving` 拒绝 |
+| `SubmitJoint`（可选） | 只下发指定关节的绝对目标，保留其他关节已有控制目标；声明 `single_joint_point` 后用于单关节步进。会话按选中关节判定到位，同时检查全设备状态 |
 | `SubmitPath`（可选） | 连续路径，下发即返回；`GetCapabilities().joint_path` 为真时调用。`tolerance_rad` 已由会话确定。执行期间 `Read` 须报告 `moving`，`Hold` 须先停止发送 |
 | `Hold` | 新鲜反馈确认静止后返回 true；不以断电或失能代替；无法确认返回 false |
 

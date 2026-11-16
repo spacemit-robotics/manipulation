@@ -71,6 +71,122 @@ public:
     bool stop_failure = false, write_failure = false, read_failure = false, reject = false;
 };
 
+class SingleJointArm final : public m::Arm {
+public:
+    m::ArmCapabilities GetCapabilities() const override {
+        m::ArmCapabilities capabilities{true, false, true};
+        capabilities.single_joint_point = true;
+        return capabilities;
+    }
+
+    void Connect() override {}
+    void Disconnect() noexcept override {}
+
+    m::ArmState Read() override {
+        m::ArmState state;
+        state.joints_rad = positions;
+        state.received_at = stale ? m::Clock::now() - std::chrono::seconds(2) : m::Clock::now();
+        state.sample_id = freeze ? sequence : ++sequence;
+        state.valid = true;
+        state.enabled = enabled;
+        state.position_mode = true;
+        state.fault = fault;
+        state.moving = moving;
+        state.command_active = dispatching;
+        return state;
+    }
+
+    void Submit(const m::JointPoint& point) override {
+        ++whole_writes;
+        positions = point.target_rad;
+        positions[1] += 0.02;
+    }
+
+    void SubmitJoint(std::size_t index, double target, double) override {
+        ++joint_writes;
+        if (!stall) positions.at(index) = target;
+    }
+
+    bool Hold() override {
+        ++holds;
+        return true;
+    }
+
+    std::vector<double> positions{0, 0.2};
+    std::uint64_t sequence = 1;
+    unsigned whole_writes = 0, joint_writes = 0, holds = 0;
+    bool enabled = true, fault = false, moving = false, dispatching = false;
+    bool stale = false, freeze = false, stall = false;
+};
+
+void TestSingleJointArrival(const std::string& directory) {
+    m::DeviceConfig config{"single", "single", {{"selected", -1, 1}, {"other", -1, 1}},
+            0.001, 0.05, 0.2};
+    auto arm = std::make_unique<SingleJointArm>();
+    auto* raw = arm.get();
+    m::ArmSession session(config, std::move(arm), directory);
+    session.Connect();
+    session.Jog(0, 0.1, 0.2);
+    raw->positions[1] += 0.02;  // Another joint settles under load without being commanded.
+    Check(raw->joint_writes == 1 && raw->whole_writes == 0, "jog sent a whole-arm target");
+    for (int i = 0; i < 2; ++i)
+        Check(session.Poll().status == m::Result::kRunning, "jog completed without three samples");
+    Check(session.Poll().status == m::Result::kSucceeded,
+            "uncommanded joint residual prevented single-joint arrival");
+
+    session.Jog(0, 0.1, 0.2);
+    raw->freeze = true;
+    Check(session.Poll().status == m::Result::kRunning, "jog accepted cached feedback");
+    raw->freeze = false;
+    raw->moving = true;
+    for (int i = 0; i < 4; ++i)
+        Check(session.Poll().status == m::Result::kRunning, "jog ignored whole-arm moving state");
+    raw->moving = false;
+    raw->dispatching = true;
+    for (int i = 0; i < 4; ++i)
+        Check(session.Poll().status == m::Result::kRunning, "jog ignored active dispatch");
+    raw->dispatching = false;
+    for (int i = 0; i < 3; ++i) session.Poll();
+    Check(session.GetResult().status == m::Result::kSucceeded, "stationary jog did not finish");
+
+    // A normal point after a jog must restore all-joint arrival checks.
+    session.Submit({{0.4, 0.4}, 0.2});
+    for (int i = 0; i < 4; ++i)
+        Check(session.Poll().status == m::Result::kRunning, "jog mask leaked into a full point");
+    Check(session.Cancel().status == m::Result::kCancelled, "point cancel lost verified hold");
+
+    const auto writes = raw->joint_writes;
+    Reject([&] { session.Jog(2, 0.1, 0.2); }, "invalid jog index accepted");
+    Reject([&] { session.Jog(0, 2.0, 0.2); }, "out-of-limit jog accepted");
+    raw->enabled = false;
+    Reject([&] { session.Jog(0, 0.1, 0.2); }, "disabled jog accepted");
+    raw->enabled = true;
+    raw->stale = true;
+    Reject([&] { session.Jog(0, 0.1, 0.2); }, "stale jog accepted");
+    raw->stale = false;
+    Check(raw->joint_writes == writes, "rejected jog wrote a joint target");
+
+    session.Jog(0, 0.1, 0.2);
+    raw->positions[1] = 2;
+    Check(session.Poll().status == m::Result::kFault,
+            "jog ignored an unselected joint outside its limits");
+    Reject([&] { session.Jog(0, 0.1, 0.2); }, "jog fault did not latch");
+    raw->positions[1] = 0.2;
+    session.Disconnect();
+    session.Connect();
+    session.Jog(0, 0.1, 0.2);
+    raw->fault = true;
+    Check(session.Poll().status == m::Result::kFault, "jog ignored a controller fault");
+    raw->fault = false;
+    session.Disconnect();
+    session.Connect();
+    raw->stall = true;
+    session.Jog(0, 0.1, 0.2);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    Check(session.Poll().status == m::Result::kTimedOut && raw->holds >= 3,
+            "stalled jog lost timeout or confirmed hold");
+}
+
 void Reconnect(m::ArmSession& session) {
     session.Disconnect();
     session.Connect();
@@ -104,6 +220,7 @@ int main() {
     try {
         TestLockDirectory(root);
         const auto directory = (root / "locks").string();
+        TestSingleJointArrival(directory);
         // timeout_s must exceed the 0.3 s arrival window; the stall below waits past it.
         m::DeviceConfig config{"test", "arm", {{"joint", -1, 1}}, 0.001, 0.5, 0.2};
         auto arm = std::make_unique<TestArm>();

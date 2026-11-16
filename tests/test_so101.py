@@ -56,6 +56,7 @@ class ServoBus:
         self.failure = None
         self.drop_goals = False
         self.stall = {}  # motor ID -> encoder position where an object blocks a goal
+        self.goal_bias = {}  # motor ID -> stable position error under load, in encoder ticks
         self.response_delay = 0
         self.done = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -95,9 +96,12 @@ class ServoBus:
                         self.registers[motor_id][address : address + len(data)] = data
                         if address == 42 and self.registers[motor_id][40]:
                             stop = self.stall.get(motor_id)
-                            self.registers[motor_id][56:58] = (
-                                data[:2] if stop is None else stop.to_bytes(2, "little")
+                            position = (
+                                int.from_bytes(data[:2], "little") + self.goal_bias.get(motor_id, 0)
+                                if stop is None
+                                else stop
                             )
+                            self.word(motor_id, 56, position)
                     payload = b""
                 elif instruction == 2:
                     address, width = parameters
@@ -221,6 +225,56 @@ class So101Tests(unittest.TestCase):
         self.assertTrue(self.bus.writes)
         self.assertTrue(all(address == 42 for _, address, _ in self.bus.writes))
 
+    def test_joint_step_preserves_other_goals_with_static_position_error(self):
+        self.gripper()
+        self.plan["device"]["arm"]["timeout_s"] = 0.3
+        self.save()
+        self.bus.word(3, 42, 2817)
+        self.bus.word(3, 56, 2826)
+        self.bus.goal_bias[3] = 9
+        other_goals = {
+            motor_id: bytes(self.bus.registers[motor_id][42:48]) for motor_id in range(2, 7)
+        }
+        with self.client() as client:
+            started = time.monotonic()
+            result = client.jog_arm(0, 0.05, 0.2)
+            self.assertLess(time.monotonic() - started, 1.0)
+            self.assertEqual(result["status"], "succeeded")
+            self.assertIn("target_reached", result["detail"])
+        self.assertEqual([(motor_id, address) for motor_id, address, _ in self.bus.writes], [(1, 42)])
+        self.assertEqual(int.from_bytes(self.bus.registers[1][56:58], "little"), 2081)
+        self.assertEqual(int.from_bytes(self.bus.registers[3][56:58], "little"), 2826)
+        for motor_id, goal in other_goals.items():
+            self.assertEqual(bytes(self.bus.registers[motor_id][42:48]), goal)
+
+    def test_joint_step_keeps_arrival_tolerance_for_the_selected_joint(self):
+        self.plan["device"]["arm"]["timeout_s"] = 0.1
+        self.save()
+        # A residual that is harmless on an uncommanded joint still prevents the selected joint
+        # from being reported as arrived. Keep the resulting fault latch and confirmed stop.
+        self.bus.goal_bias[1] = 9
+        with self.client() as client:
+            with self.assertRaisesRegex(DeviceCommandError, "point deadline exceeded") as failure:
+                client.jog_arm(0, 0.05, 0.2)
+            self.assertEqual(failure.exception.result["status"], "timed_out")
+            self.assertTrue(client.state()["latched"])
+
+    def test_joint_step_rejects_unsafe_inputs_and_other_joint_state_without_writes(self):
+        with self.client() as client:
+            for index, delta, speed in ((5, 0.05, 0.2), (0, 3, 0.2), (0, 0.05, 0.00001)):
+                with self.subTest(index=index, delta=delta, speed=speed):
+                    with self.assertRaises(DeviceCommandError):
+                        client.jog_arm(index, delta, speed)
+        for address, value in ((40, 0), (33, 1), (65, 0x04), (66, 1)):
+            with self.subTest(address=address):
+                before = self.bus.registers[3][address]
+                self.bus.registers[3][address] = value
+                with self.client() as client:
+                    with self.assertRaises(DeviceCommandError):
+                        client.jog_arm(0, 0.05, 0.2)
+                self.bus.registers[3][address] = before
+        self.assertEqual(self.bus.writes, [])
+
     def test_missing_arm_calibration_allows_inspect_but_rejects_enable_and_move(self):
         del self.plan["device"]["options"]["arm_calibration"]
         self.save()
@@ -229,6 +283,8 @@ class So101Tests(unittest.TestCase):
             self.assertIs(client.state()["joint_reference_verified"], False)
             with self.assertRaises(DeviceCommandError):
                 client.move_arm([0.1] * 5, 0.1)
+            with self.assertRaises(DeviceCommandError):
+                client.jog_arm(0, 0.05, 0.2)
             with self.assertRaises(DeviceCommandError):
                 client.enable_arm()
         self.assertEqual(self.bus.writes, [])

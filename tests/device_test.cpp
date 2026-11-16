@@ -15,10 +15,14 @@ class PreflightArm final : public spacemit::manipulation::Arm {
 public:
     unsigned writes = 0;
     unsigned holds = 0;
+    unsigned joint_writes = 0;
     bool enabled = true;
+    bool native_jog = false;
 
     spacemit::manipulation::ArmCapabilities GetCapabilities() const override {
-        return {true, false, true};
+        spacemit::manipulation::ArmCapabilities capabilities{true, false, true};
+        capabilities.single_joint_point = native_jog;
+        return capabilities;
     }
 
     void Connect() override {}
@@ -39,6 +43,12 @@ public:
     void Submit(const spacemit::manipulation::JointPoint& point) override {
         ++writes;
         position_ = point.target_rad[0];
+    }
+
+    void SubmitJoint(std::size_t index, double target, double) override {
+        if (index != 0) throw spacemit::manipulation::CommandRejected("invalid single joint");
+        ++joint_writes;
+        position_ = target;
     }
 
     bool Hold() override {
@@ -179,6 +189,42 @@ void CheckBusyPreflight(
     }
 }
 
+void CheckJogDispatch(
+        const spacemit::manipulation::DeviceDefinition& definition, const char* directory) {
+    namespace m = spacemit::manipulation;
+    for (bool native : {false, true}) {
+        auto arm = std::make_unique<PreflightArm>();
+        auto hand = std::make_unique<PreflightHand>();
+        auto* observed_arm = arm.get();
+        auto* observed_hand = hand.get();
+        observed_arm->native_jog = native;
+        m::DeviceSession session(definition, {std::move(arm), std::move(hand)}, directory);
+        session.Connect();
+        auto result = session.JogArm(0, 0.05, 0.2);
+        if (result.status != m::Result::kSucceeded ||
+                std::abs(session.ReadArm().joints_rad[0] - 0.05) > 1e-9 ||
+                observed_arm->writes != (native ? 0u : 1u) ||
+                observed_arm->joint_writes != (native ? 1u : 0u)) {
+            throw std::runtime_error("jog did not select native or fallback point execution");
+        }
+        observed_hand->moving = true;
+        bool busy = false;
+        try {
+            session.JogArm(0, 0.05, 0.2);
+        } catch (const m::BusyRejected&) {
+            busy = true;
+        }
+        if (!busy || observed_arm->writes + observed_arm->joint_writes != 1 || session.Latched())
+            throw std::runtime_error("jog bypassed effector preflight or wrote while busy");
+        observed_hand->moving = false;
+        result = session.JogArm(0, 0.05, 0.2, [] { return true; });
+        if (result.status != m::Result::kCancelled ||
+                observed_arm->writes + observed_arm->joint_writes != 1) {
+            throw std::runtime_error("jog ignored cancellation before submission");
+        }
+    }
+}
+
 class FaultHand final : public spacemit::manipulation::EndEffector {
 public:
     bool fault = true;
@@ -257,6 +303,7 @@ int main() {
         definition.arm = {"arm", "mock_device_test", {{"j1", -1, 1}}};
         definition.effector = {"hand", {"finger"}};
         CheckBusyPreflight(definition, directory);
+        CheckJogDispatch(definition, directory);
         for (bool holding : {false, true}) {
             auto devices = registry.Create("mock_device", definition, {});
             auto hand = std::make_unique<DispatchHand>();

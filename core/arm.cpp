@@ -73,6 +73,7 @@ struct ArmSession::Impl {
     unsigned settled_samples = 0;
     double tolerance = 0;  // Arrival tolerance of the running command.
     Completion completion = Completion::kArrival;
+    std::optional<std::size_t> arrival_joint;
     bool settling = false;
 };
 
@@ -90,6 +91,10 @@ ArmState Arm::Diagnose() {
 
 void Arm::SubmitPath(const JointPath&) {
     throw CommandRejected("joint path unsupported");
+}
+
+void Arm::SubmitJoint(std::size_t, double, double) {
+    throw CommandRejected("single-joint point unsupported");
 }
 
 void Arm::SubmitTrajectory(const JointTrajectory&) {
@@ -324,7 +329,8 @@ void ArmSession::CheckTarget(const std::vector<double>& target_rad, double speed
 
 template <typename Extra, typename Write>
 CommandResult ArmSession::Begin(const JointPoint& final_point, double tolerance_rad,
-        Completion completion, Extra extra_time_s, Write write) {
+        Completion completion, Extra extra_time_s, Write write,
+        std::optional<std::size_t> arrival_joint) {
     auto& p = *impl_;
     auto state = Read();
     // Motion is allowed only when it is the arm settling after our own command that did not wait.
@@ -334,6 +340,7 @@ CommandResult ArmSession::Begin(const JointPoint& final_point, double tolerance_
     p.point = final_point;
     p.tolerance = tolerance_rad;
     p.completion = completion;
+    p.arrival_joint = arrival_joint;
     p.settling = false;
     p.last_sample = state.sample_id;
     p.settled_samples = 0;
@@ -381,6 +388,26 @@ CommandResult ArmSession::Submit(const JointPoint& point) {
             resolved, resolved.tolerance_rad,
             point.wait_for_arrival ? Completion::kArrival : Completion::kWithinTolerance,
             [](const ArmState&) { return 0.0; }, [&] { impl_->arm->Submit(resolved); });
+}
+
+CommandResult ArmSession::Jog(std::size_t joint_index, double delta_rad, double speed_scale) {
+    Ready();
+    if (!GetCapabilities().single_joint_point || joint_index >= impl_->config.joints.size() ||
+            !std::isfinite(delta_rad)) {
+        throw CommandRejected("invalid or unsupported single-joint jog");
+    }
+    JointPoint point;
+    point.speed_scale = speed_scale;
+    return Begin(
+            point, impl_->config.tolerance_rad, Completion::kArrival,
+            [&](const ArmState& state) {
+                point.target_rad = state.joints_rad;
+                point.target_rad[joint_index] += delta_rad;
+                CheckTarget(point.target_rad, speed_scale);
+                return 0.0;
+            },
+            [&] { impl_->arm->SubmitJoint(joint_index, point.target_rad[joint_index], speed_scale); },
+            joint_index);
 }
 
 CommandResult ArmSession::Follow(const JointPoint& point) {
@@ -507,6 +534,13 @@ CommandResult ArmSession::Poll() {
         }
         bool within = !state.command_active;
         for (std::size_t i = 0; i < p.point.target_rad.size(); ++i) {
+            if (p.arrival_joint) {
+                const auto& limit = p.config.joints[i];
+                Check(state.joints_rad[i] >= limit.minimum_rad &&
+                                state.joints_rad[i] <= limit.maximum_rad,
+                        "arm feedback outside joint limits during jog");
+                if (i != *p.arrival_joint) continue;
+            }
             within = within && std::abs(state.joints_rad[i] - p.point.target_rad[i]) <= p.tolerance;
         }
         if (p.completion == Completion::kWithinTolerance) {

@@ -87,7 +87,8 @@ std::string DeviceCapabilitiesJson(const m::DeviceSession& session) {
     std::ostringstream out;
     out << std::boolalpha << std::setprecision(17)
         << "{\"arm\":{\"joint_point\":" << arm.joint_point << ",\"joint_path\":" << arm.joint_path
-        << ",\"joint_trajectory\":" << arm.joint_trajectory << ",\"enable\":" << arm.enable
+        << ",\"joint_trajectory\":" << arm.joint_trajectory
+        << ",\"single_joint_point\":" << arm.single_joint_point << ",\"enable\":" << arm.enable
         << ",\"disable\":" << arm.disable << ",\"verified_hold\":" << arm.verified_hold
         << ",\"minimum_speed_scale\":" << arm.minimum_speed_scale << "},\"effector\":";
     if (session.HasEffector()) {
