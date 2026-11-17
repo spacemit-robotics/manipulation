@@ -9,6 +9,9 @@ descriptions/simulation/*/models/*/assets/
 MUJOCO_LOG.TXT
 
 # manipulation-simulation-camera output files; the directory is chosen by the
-# caller via --output, so ignore the emitted files rather than a fixed path.
+# caller via --output, so ignore both the emitted files and the conventional
+# directory names used by the README (camera_frame) and by hand (camera-frame).
+camera_frame/
+camera-frame/
 rgb.ppm
 depth.f32
