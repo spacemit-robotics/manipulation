@@ -1,0 +1,3 @@
+<mujoco model="invalid_timestep">
+  <option timestep="-0.01"/>
+</mujoco>

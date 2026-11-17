@@ -6,9 +6,10 @@
  *
  * No end effector, vendor types or implicit home or enable.
  */
-#ifndef MANIPULATION_ARM_H_
-#define MANIPULATION_ARM_H_
+#ifndef ARM_H
+#define ARM_H
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,8 @@ struct ArmState {
     std::vector<ControllerJointLimit> controller_limits;
     /// The driver is still delivering the last command, for example while streaming.
     bool command_active = false;
+    /// Joint reference matches installed calibration; unknown when not checked by the driver.
+    std::optional<bool> joint_reference_verified;
 };
 
 /**
@@ -138,6 +141,8 @@ struct ArmCapabilities {
     bool joint_trajectory = false;
     /// Supports Disable(), an explicit torque release never used by Hold().
     bool disable = false;
+    /// Supports a single-joint point without changing the other controller targets.
+    bool single_joint_point = false;
 };
 
 /**
@@ -174,6 +179,9 @@ public:
     virtual void Disable();
     /// Accept a point target; returns on acceptance, not completion.
     virtual void Submit(const JointPoint& point) = 0;
+    /// Accept one absolute joint target, preserving every other controller target. Default:
+    /// rejected without a write. Used for relative jogs when single_joint_point is declared.
+    virtual void SubmitJoint(std::size_t joint_index, double target_rad, double speed_scale);
     /// Accept a path; default: rejected, nothing written.
     virtual void SubmitPath(const JointPath& path);
     /// Accept a trajectory; default: rejected, nothing written.
@@ -183,4 +191,4 @@ public:
 };
 
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_ARM_H_
+#endif  // ARM_H

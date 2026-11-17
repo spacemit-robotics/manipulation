@@ -1,0 +1,48 @@
+<mujoco model="transmission_metadata">
+  <option gravity="0 0 0"/>
+  <default>
+    <geom type="sphere" size="0.05" mass="1" contype="0" conaffinity="0"/>
+  </default>
+  <worldbody>
+    <site name="anchor" pos="0 0 2"/>
+    <body name="first" pos="0 0 1">
+      <joint name="left" type="slide"/>
+      <geom/>
+      <site name="moving" pos="0 0 0.1"/>
+    </body>
+    <body name="second" pos="0 1 1">
+      <joint name="right" type="hinge"/>
+      <geom/>
+    </body>
+    <body name="ball_body" pos="1 0 1">
+      <joint name="ball" type="ball"/>
+      <geom/>
+    </body>
+    <body name="unnamed_joint_body" pos="1 1 1">
+      <joint type="slide"/>
+      <geom/>
+      <site name="unnamed_moving"/>
+    </body>
+  </worldbody>
+  <tendon>
+    <fixed name="split">
+      <joint joint="left" coef="0.5"/>
+      <joint joint="right" coef="-0.5"/>
+    </fixed>
+    <fixed name="zero_coefficient">
+      <joint joint="left" coef="0"/>
+    </fixed>
+    <spatial name="spatial">
+      <site site="anchor"/>
+      <site site="moving"/>
+    </spatial>
+  </tendon>
+  <actuator>
+    <position name="split_control" tendon="split" gear="2" kp="1"/>
+    <position name="zero_control" tendon="zero_coefficient" kp="1"/>
+    <position name="spatial_control" tendon="spatial" kp="1"/>
+    <position name="ball_control" joint="ball" kp="1"/>
+    <position name="zero_gear" joint="left" gear="0" kp="1"/>
+    <general name="site_control" site="unnamed_moving"/>
+  </actuator>
+</mujoco>

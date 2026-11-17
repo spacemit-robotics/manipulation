@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 """Public control operations and permissions over the real local service, without hardware."""
 
+from contextlib import ExitStack
+from contextlib import redirect_stdout
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -10,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -23,6 +27,36 @@ SPEC = importlib.util.spec_from_file_location(
 )
 operator_cli = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(operator_cli)
+
+
+class HandDeadlineTests(unittest.TestCase):
+    def test_all_hand_commands_reserve_feedback_and_stop_confirmation_time(self):
+        for configured, expected in ((5, 10), (10, 15), (120, 125)):
+            described = dict(
+                channels=["gripper"], effector_feedback="position", effector_timeout_s=configured
+            )
+            context = SimpleNamespace(
+                plan=lambda unused: Path("device.yaml"),
+                describe=lambda unused: described,
+                binary=lambda unused: Path("manipulation-device"),
+            )
+            args = SimpleNamespace(
+                plan=None, positions=[0.2], duration=1.0, channel="gripper", delta=0.01
+            )
+            for operation in (operator_cli.hand_move, operator_cli.hand_step, operator_cli.hand_grasp):
+                with self.subTest(timeout_s=configured, operation=operation.__name__), patch(
+                    "spacemit_manipulation.client.DeviceClient"
+                ) as factory, redirect_stdout(io.StringIO()):
+                    client = factory.return_value.__enter__.return_value
+                    client.state.return_value = dict(
+                        effector_positions=[0.5], effector_holding=False, effector_loads=[0]
+                    )
+                    client.capabilities.return_value = {"effector": {"grasp_detection": True}}
+                    client.move_effector.return_value = {"status": "succeeded"}
+                    operation(context, args)
+                    self.assertEqual(client.move_effector.call_count, 1)
+                    self.assertEqual(client.move_effector.call_args.kwargs["timeout"], expected)
+                    self.assertEqual(client.move_effector.call_args.kwargs["duration_s"], 1.0)
 
 
 class ControlApiTests(unittest.TestCase):
@@ -56,6 +90,21 @@ class ControlApiTests(unittest.TestCase):
         return subprocess.run(
             [CLI, operation, str(self.filename), *flags], capture_output=True, text=True, timeout=10
         )
+
+    def test_hand_move_long_open_loop_duration_returns_unverified(self):
+        self.plan["device"]["effector"].update(feedback="none", timeout_s=15)
+        self.save()
+        context = SimpleNamespace(
+            plan=lambda unused: self.filename,
+            binary=lambda unused: CLI,
+            describe=lambda unused: json.loads(self.cli("describe").stdout),
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            operator_cli.hand_move(context, SimpleNamespace(plan=None, positions=[0.2], duration=11))
+        self.assertIn("'status': 'unverified'", output.getvalue())
+        self.assertIn("execution time elapsed", output.getvalue())
+        self.assertNotIn("'status': 'succeeded'", output.getvalue())
 
     def test_capabilities_offline_even_when_another_owner_holds_the_lease(self):
         with DeviceClient(CLI, self.filename, allow_motion=False) as client:
@@ -258,14 +307,19 @@ class ControlApiTests(unittest.TestCase):
         }
         for operation, (method, permission) in cases.items():
             with self.subTest(operation=operation):
-                with (
-                    patch.object(
-                        sys, "argv", ["manipulation", "--prefix", str(self.directory), operation]
-                    ),
-                    patch.object(operator_cli, "Context") as context_type,
-                    patch("spacemit_manipulation.client.DeviceClient") as client_type,
-                    patch("builtins.print"),
-                ):
+                with ExitStack() as patches:
+                    patches.enter_context(
+                        patch.object(
+                            sys,
+                            "argv",
+                            ["manipulation", "--prefix", str(self.directory), operation],
+                        )
+                    )
+                    context_type = patches.enter_context(patch.object(operator_cli, "Context"))
+                    client_type = patches.enter_context(
+                        patch("spacemit_manipulation.client.DeviceClient")
+                    )
+                    patches.enter_context(patch("builtins.print"))
                     context = context_type.return_value
                     context.binary.return_value = CLI
                     context.plan.return_value = self.filename

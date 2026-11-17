@@ -1,0 +1,24 @@
+<mujoco model="rgbd_contract">
+  <option timestep="0.05" gravity="0 0 0"/>
+  <visual>
+    <global offwidth="640" offheight="480"/>
+    <map znear="0.01" zfar="10"/>
+    <quality shadowsize="0" offsamples="0"/>
+  </visual>
+  <worldbody>
+    <light pos="0 0 3" diffuse="1 1 1"/>
+    <geom name="ground" type="plane" size="3 3 0.1" rgba="0.5 0.5 0.5 1"/>
+    <geom name="red" type="box" pos="-0.5 0.4 0.1" size="0.2 0.2 0.1" rgba="1 0 0 1"/>
+    <geom name="blue" type="box" pos="0.5 -0.4 0.1" size="0.2 0.2 0.1" rgba="0 0 1 1"/>
+    <camera name="fixed" pos="0 0 2" fovy="60"/>
+    <camera name="ortho" pos="0 0 2" orthographic="true" fovy="2"/>
+    <camera name="calibrated" pos="0 0 2" sensorsize="0.036 0.024"
+        resolution="640 480" focal="0.02 0.02"/>
+    <body name="carrier" pos="2 0 1.6">
+      <joint name="height" type="slide" axis="0 0 1"/>
+      <geom type="sphere" size="0.01" mass="1"/>
+      <camera name="moving" pos="-2 0 0" fovy="60"/>
+    </body>
+  </worldbody>
+  <keyframe><key name="moving" qvel="1"/></keyframe>
+</mujoco>

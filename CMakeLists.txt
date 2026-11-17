@@ -15,6 +15,41 @@ find_package(yaml-cpp REQUIRED)
 option(MANIPULATION_ENABLE_NERO "Build the Nero/Revo2 driver (vendor SDK is used at run time only)"
     ON)
 option(MANIPULATION_ENABLE_SO101 "Build the SO101 arm and gripper driver" ON)
+option(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO "Build the offline Pinocchio FK/IK backend" OFF)
+option(MANIPULATION_ENABLE_MUJOCO "Build the local MuJoCo physics simulation driver" OFF)
+option(MANIPULATION_ENABLE_MUJOCO_REMOTE "Build the TCP MuJoCo client without a local engine" OFF)
+option(MANIPULATION_ENABLE_SIMULATION_RENDERER "Build the simulation viewer and RGB-D renderer" OFF)
+if(MANIPULATION_ENABLE_SIMULATION_RENDERER AND NOT MANIPULATION_ENABLE_MUJOCO)
+    message(FATAL_ERROR "The simulation renderer requires MANIPULATION_ENABLE_MUJOCO=ON")
+endif()
+set(_manipulation_mujoco_source "${CMAKE_CURRENT_SOURCE_DIR}/simulation/mujoco")
+if(DEFINED MANIPULATION_MUJOCO_SOURCE_DIR)
+    get_filename_component(_configured_mujoco_source "${MANIPULATION_MUJOCO_SOURCE_DIR}"
+        ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    get_filename_component(_sdk_mujoco_source "${CMAKE_CURRENT_SOURCE_DIR}/../../simulation/mujoco"
+        ABSOLUTE)
+    # Upgrade the SDK default in existing build trees while retaining explicit external sources.
+    if(_configured_mujoco_source STREQUAL _sdk_mujoco_source)
+        set(MANIPULATION_MUJOCO_SOURCE_DIR "${_manipulation_mujoco_source}" CACHE PATH
+            "MuJoCo physics source; otherwise use an installed mujoco_world package" FORCE)
+    endif()
+endif()
+set(MANIPULATION_MUJOCO_SOURCE_DIR "${_manipulation_mujoco_source}" CACHE PATH
+    "MuJoCo physics source; otherwise use an installed mujoco_world package")
+if(MANIPULATION_ENABLE_MUJOCO)
+    if(EXISTS "${MANIPULATION_MUJOCO_SOURCE_DIR}/CMakeLists.txt")
+        get_filename_component(_active_mujoco_source "${MANIPULATION_MUJOCO_SOURCE_DIR}"
+            ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+        if(NOT _active_mujoco_source STREQUAL _manipulation_mujoco_source)
+            # External providers may also offer a humanoid simulator; only use their physics API.
+            set(MUJOCO_BUILD_LEGACY_SIMULATOR OFF)
+        endif()
+        set(MUJOCO_BUILD_RENDERER ${MANIPULATION_ENABLE_SIMULATION_RENDERER})
+        add_subdirectory("${MANIPULATION_MUJOCO_SOURCE_DIR}" mujoco_world)
+    else()
+        find_package(mujoco_world CONFIG REQUIRED)
+    endif()
+endif()
 set(MANIPULATION_MOTOR_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../peripherals/motor" CACHE PATH
     "Motor source tree for the SO101 driver; otherwise use an installed motor package")
 if(MANIPULATION_ENABLE_SO101)
@@ -70,6 +105,9 @@ endif()
 if(MANIPULATION_ENABLE_SO101)
     add_subdirectory(drivers/arms/so101)
 endif()
+if(MANIPULATION_ENABLE_MUJOCO OR MANIPULATION_ENABLE_MUJOCO_REMOTE)
+    add_subdirectory(drivers/simulation/mujoco)
+endif()
 foreach(module IN LISTS MANIPULATION_EXTRA_DRIVER_DIRS)
     string(MD5 module_key "${module}")
     add_subdirectory("${module}" "extra_drivers/${module_key}")
@@ -90,10 +128,57 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/builtin_registry.cpp" CONTENT
 target_sources(manipulation_drivers PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/builtin_registry.cpp")
 
 # Capabilities and tools.
-add_library(manipulation_motion runtime/device_plan.cpp)
+add_library(manipulation_kinematics capabilities/kinematics/kinematics.cpp)
+target_compile_features(manipulation_kinematics PUBLIC cxx_std_17)
+target_include_directories(manipulation_kinematics PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+set_target_properties(manipulation_kinematics PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set(kinematics_source "#include \"manipulation/kinematics.h\"\nnamespace spacemit::manipulation {\n")
+if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
+    find_package(pinocchio CONFIG REQUIRED)
+    target_sources(manipulation_kinematics PRIVATE capabilities/kinematics/pinocchio_kinematics.cpp)
+    target_link_libraries(manipulation_kinematics PRIVATE pinocchio::pinocchio)
+    string(APPEND kinematics_source "void RegisterPinocchioKinematics(KinematicsRegistry*);\n")
+endif()
+string(APPEND kinematics_source
+    "KinematicsRegistry MakeBuiltinKinematicsRegistry() { KinematicsRegistry registry;\n")
+if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
+    string(APPEND kinematics_source "RegisterPinocchioKinematics(&registry);\n")
+endif()
+string(APPEND kinematics_source "return registry; }\n}\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/builtin_kinematics.cpp"
+    CONTENT "${kinematics_source}")
+target_sources(manipulation_kinematics PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/builtin_kinematics.cpp")
+
+add_library(manipulation_motion runtime/device_plan.cpp runtime/device_composition.cpp
+    capabilities/capability_registry.cpp capabilities/motion/registered_capabilities.cpp)
 target_link_libraries(manipulation_motion PUBLIC manipulation_contracts PRIVATE yaml-cpp
     Threads::Threads)
 set_target_properties(manipulation_motion PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set(MANIPULATION_EXTRA_CAPABILITY_DIRS "" CACHE STRING "Additional capability module directories")
+set_property(GLOBAL PROPERTY MANIPULATION_CAPABILITY_REGISTRATIONS "")
+manipulation_register_capability(RegisterMotionCapabilities)
+foreach(module IN LISTS MANIPULATION_EXTRA_CAPABILITY_DIRS)
+    string(MD5 module_key "${module}")
+    add_subdirectory("${module}" "extra_capabilities/${module_key}")
+endforeach()
+get_property(capability_registrations GLOBAL PROPERTY MANIPULATION_CAPABILITY_REGISTRATIONS)
+set(capability_source
+    "#include \"manipulation/capability.h\"\nnamespace spacemit::manipulation {\n")
+foreach(symbol IN LISTS capability_registrations)
+    string(APPEND capability_source "void ${symbol}(CapabilityRegistry*);\n")
+endforeach()
+string(APPEND capability_source
+    "CapabilityRegistry MakeBuiltinCapabilityRegistry() { CapabilityRegistry registry;\n")
+foreach(symbol IN LISTS capability_registrations)
+    string(APPEND capability_source "${symbol}(&registry);\n")
+endforeach()
+string(APPEND capability_source "return registry; }\n}\n")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/builtin_capabilities.cpp"
+    CONTENT "${capability_source}")
+target_sources(manipulation_motion PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/builtin_capabilities.cpp")
 add_executable(manipulation-device capabilities/motion/cli/device_cli.cpp
     capabilities/motion/cli/device_service.cpp capabilities/diagnostics/arm_check.cpp)
 target_include_directories(manipulation-device PRIVATE capabilities/diagnostics)
@@ -102,6 +187,34 @@ target_link_libraries(manipulation-device PRIVATE manipulation_motion manipulati
 file(RELATIVE_PATH MANIPULATION_LIB_FROM_BIN "/${CMAKE_INSTALL_BINDIR}" "/${CMAKE_INSTALL_LIBDIR}")
 set_target_properties(manipulation-device PROPERTIES INSTALL_RPATH
     "$ORIGIN/${MANIPULATION_LIB_FROM_BIN}")
+
+if(MANIPULATION_ENABLE_MUJOCO OR MANIPULATION_ENABLE_MUJOCO_REMOTE)
+    add_executable(manipulation-simulation-camera
+        capabilities/simulation/observer_client.cpp capabilities/simulation/camera_cli.cpp)
+    target_include_directories(manipulation-simulation-camera PRIVATE drivers/simulation/mujoco)
+    target_link_libraries(manipulation-simulation-camera PRIVATE manipulation_drivers yaml-cpp
+        Threads::Threads)
+    set_target_properties(manipulation-simulation-camera PROPERTIES INSTALL_RPATH
+        "$ORIGIN/${MANIPULATION_LIB_FROM_BIN}")
+    install(TARGETS manipulation-simulation-camera RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+if(MANIPULATION_ENABLE_MUJOCO)
+    add_executable(manipulation-simulation capabilities/simulation/server.cpp
+        capabilities/simulation/simulation_server.cpp)
+    target_include_directories(manipulation-simulation PRIVATE drivers/simulation/mujoco)
+    target_link_libraries(manipulation-simulation PRIVATE manipulation_motion manipulation_drivers
+        mujoco_sim::world yaml-cpp Threads::Threads)
+    if(MANIPULATION_ENABLE_SIMULATION_RENDERER)
+        target_sources(manipulation-simulation PRIVATE capabilities/simulation/renderer_bridge.cpp)
+        target_link_libraries(manipulation-simulation PRIVATE mujoco_sim::render)
+        target_compile_definitions(manipulation-simulation PRIVATE
+            MANIPULATION_HAS_SIMULATION_RENDERER=1)
+    endif()
+    set_target_properties(manipulation-simulation PROPERTIES INSTALL_RPATH
+        "$ORIGIN/${MANIPULATION_LIB_FROM_BIN}")
+    install(TARGETS manipulation-simulation RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
 
 if(MANIPULATION_ENABLE_CALIBRATION)
     find_package(OpenCV REQUIRED COMPONENTS core calib3d)
@@ -120,6 +233,7 @@ endif()
 
 # Installation. Every runtime path is relative to the prefix, so the tree can be moved.
 install(TARGETS manipulation_contracts manipulation_drivers manipulation_motion manipulation-device
+    manipulation_kinematics
     EXPORT manipulationTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -132,10 +246,14 @@ install(FILES capabilities/kinematics/python/urdf_fk.py capabilities/kinematics/
     capabilities/calibration/cli/collect.py capabilities/calibration/cli/hand_eye_cli.py
     capabilities/calibration/python/sampling.py capabilities/calibration/python/charuco.py
     capabilities/calibration/python/charuco_sampler.py capabilities/diagnostics/cli/operator_cli.py
+    capabilities/calibration/python/calibration_geometry.py
+    capabilities/calibration/python/hand_eye.py
+    capabilities/calibration/python/calibration_session.py
     DESTINATION ${MANIPULATION_PYTHON_DIR}/spacemit_manipulation)
 install(DIRECTORY descriptions/ DESTINATION ${CMAKE_INSTALL_DATADIR}/manipulation/descriptions)
 install(DIRECTORY examples/ DESTINATION ${CMAKE_INSTALL_DATADIR}/manipulation/examples)
 install(FILES tools/build_manifest.py tools/check_environment.py tools/configure_device.py
+    tools/prepare_simulation_assets.py
     DESTINATION ${CMAKE_INSTALL_DATADIR}/manipulation/tools)
 configure_file(tools/layout.json.in ${CMAKE_CURRENT_BINARY_DIR}/.spacemit-manipulation.json @ONLY)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/.spacemit-manipulation.json DESTINATION .)
@@ -160,6 +278,19 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/manipulation-config.cmake DESTINATION
 
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(manipulation_kinematics_test tests/kinematics_test.cpp)
+    target_link_libraries(manipulation_kinematics_test PRIVATE manipulation_kinematics)
+    if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
+        add_test(NAME manipulation_kinematics_cpp_contract COMMAND manipulation_kinematics_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/kinematics_chain.urdf
+            ${CMAKE_CURRENT_SOURCE_DIR}/descriptions/robots/so101/so101.urdf)
+    else()
+        add_test(NAME manipulation_kinematics_cpp_contract COMMAND manipulation_kinematics_test)
+    endif()
+    add_test(NAME manipulation_simulation_assets COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulation_assets.py)
+    set_tests_properties(manipulation_simulation_assets PROPERTIES TIMEOUT 30
+        ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
     set(test_environment
         "PYTHONDONTWRITEBYTECODE=1;MANIPULATION_DEVICE=$<TARGET_FILE:manipulation-device>"
         "MANIPULATION_TEST_NERO=$<BOOL:${MANIPULATION_ENABLE_NERO}>"
@@ -172,8 +303,24 @@ if(BUILD_TESTING)
     add_executable(manipulation_device_test tests/device_test.cpp)
     target_link_libraries(manipulation_device_test PRIVATE manipulation_motion manipulation_drivers)
     add_test(NAME manipulation_device_embedded_contract COMMAND manipulation_device_test)
-    set_tests_properties(manipulation_arm_contract manipulation_device_embedded_contract PROPERTIES
+    add_executable(manipulation_capability_test tests/capability_test.cpp)
+    target_link_libraries(manipulation_capability_test PRIVATE manipulation_motion
+        manipulation_drivers yaml-cpp)
+    add_test(NAME manipulation_capability_contract COMMAND manipulation_capability_test)
+    add_executable(manipulation_composition_test tests/composition_test.cpp)
+    target_link_libraries(manipulation_composition_test PRIVATE manipulation_contracts
+        manipulation_drivers)
+    add_test(NAME manipulation_composition_contract COMMAND manipulation_composition_test)
+    add_test(NAME manipulation_composition_cli_contract COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_composition.py)
+    add_test(NAME manipulation_capability_client_contract COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capability_client.py)
+    set_tests_properties(manipulation_arm_contract manipulation_device_embedded_contract
+        manipulation_capability_contract PROPERTIES
         ENVIRONMENT "${test_environment}")
+    set_tests_properties(manipulation_composition_contract manipulation_composition_cli_contract
+        manipulation_capability_client_contract
+        PROPERTIES TIMEOUT 120 ENVIRONMENT "${test_environment}")
     add_test(NAME manipulation_device_contract COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_device.py)
     add_test(NAME manipulation_tools_contract COMMAND ${Python3_EXECUTABLE}
@@ -192,6 +339,52 @@ if(BUILD_TESTING)
     set_tests_properties(manipulation_control_api_contract manipulation_control_cli_contract
         PROPERTIES
         TIMEOUT 90 ENVIRONMENT "${test_environment}")
+    if(MANIPULATION_ENABLE_MUJOCO)
+        add_executable(manipulation_mujoco_test tests/mujoco_test.cpp)
+        target_link_libraries(manipulation_mujoco_test PRIVATE manipulation_motion
+            manipulation_drivers)
+        add_test(NAME manipulation_mujoco_contract COMMAND manipulation_mujoco_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mujoco)
+        add_test(NAME manipulation_mujoco_client_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mujoco.py)
+        add_test(NAME manipulation_mujoco_remote_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mujoco_remote.py)
+        add_executable(manipulation_mujoco_runtime_test tests/mujoco_runtime_test.cpp)
+        target_link_libraries(manipulation_mujoco_runtime_test PRIVATE manipulation_motion
+            manipulation_drivers mujoco_sim::world)
+        add_test(NAME manipulation_mujoco_runtime_contract COMMAND manipulation_mujoco_runtime_test
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/mujoco)
+        set_tests_properties(manipulation_mujoco_runtime_contract PROPERTIES TIMEOUT 30
+            ENVIRONMENT "${test_environment}")
+        set_tests_properties(manipulation_mujoco_contract manipulation_mujoco_client_contract
+            PROPERTIES TIMEOUT 120 ENVIRONMENT "${test_environment}")
+        set_tests_properties(manipulation_mujoco_remote_contract PROPERTIES TIMEOUT 150
+            ENVIRONMENT "${test_environment};MANIPULATION_SIMULATION=$<TARGET_FILE:manipulation-simulation>")
+        if(MANIPULATION_ENABLE_SIMULATION_RENDERER AND NOT MUJOCO_RENDER_USE_GL4ES)
+            find_program(MANIPULATION_XVFB_RUN xvfb-run)
+            if(MANIPULATION_XVFB_RUN)
+                add_test(NAME manipulation_simulation_render_contract
+                    COMMAND ${MANIPULATION_XVFB_RUN} -a ${Python3_EXECUTABLE}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulation_render.py)
+                set_tests_properties(manipulation_simulation_render_contract PROPERTIES TIMEOUT 60
+                    ENVIRONMENT "${test_environment};MANIPULATION_SIMULATION=$<TARGET_FILE:manipulation-simulation>;MANIPULATION_SIMULATION_CAMERA=$<TARGET_FILE:manipulation-simulation-camera>")
+            endif()
+        endif()
+    endif()
+    if(MANIPULATION_ENABLE_MUJOCO OR MANIPULATION_ENABLE_MUJOCO_REMOTE)
+        add_test(NAME manipulation_simulation_driver_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulation_drivers.py)
+        set_tests_properties(manipulation_simulation_driver_contract PROPERTIES TIMEOUT 30
+            ENVIRONMENT "${test_environment};MANIPULATION_TEST_MUJOCO=$<BOOL:${MANIPULATION_ENABLE_MUJOCO}>")
+        add_test(NAME manipulation_simulation_camera_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_simulation_camera.py)
+        set_tests_properties(manipulation_simulation_camera_contract PROPERTIES TIMEOUT 60
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;MANIPULATION_SIMULATION_CAMERA=$<TARGET_FILE:manipulation-simulation-camera>")
+        add_test(NAME manipulation_mujoco_transport_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_mujoco_transport.py)
+        set_tests_properties(manipulation_mujoco_transport_contract PROPERTIES TIMEOUT 120
+            ENVIRONMENT "${test_environment}")
+    endif()
     if(MANIPULATION_ENABLE_SO101)
         add_test(NAME manipulation_so101_contract
             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_so101.py)
@@ -201,6 +394,7 @@ if(BUILD_TESTING)
         set(so101_environment "${test_environment}"
             "MANIPULATION_FEETECH_BUS=$<TARGET_FILE:manipulation_feetech_bus>")
         set_tests_properties(manipulation_so101_contract manipulation_so101_calibration_contract
+            manipulation_composition_cli_contract
             PROPERTIES TIMEOUT 90 ENVIRONMENT "${so101_environment}")
     endif()
     if(MANIPULATION_ENABLE_NERO)
@@ -215,6 +409,10 @@ if(BUILD_TESTING)
             ENVIRONMENT "${nero_environment}")
     endif()
     if(MANIPULATION_ENABLE_CALIBRATION)
+        add_test(NAME manipulation_calibration_session_contract COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_calibration_session.py)
+        set_tests_properties(manipulation_calibration_session_contract PROPERTIES TIMEOUT 120
+            ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1;PYTHONNOUSERSITE=1")
         add_executable(manipulation_calibration_test tests/calibration_test.cpp)
         target_include_directories(manipulation_calibration_test PRIVATE ${OpenCV_INCLUDE_DIRS})
         target_link_libraries(manipulation_calibration_test PRIVATE manipulation_calibration

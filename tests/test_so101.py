@@ -16,6 +16,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +29,11 @@ CALIBRATE = ROOT / "drivers/arms/so101/tools/calibrate.py"
 SPEC = importlib.util.spec_from_file_location("so101_calibration", CALIBRATE)
 calibration = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(calibration)
+OPERATOR_SPEC = importlib.util.spec_from_file_location(
+    "spacemit_manipulation.operator_cli", ROOT / "capabilities/diagnostics/cli/operator_cli.py"
+)
+operator_cli = importlib.util.module_from_spec(OPERATOR_SPEC)
+OPERATOR_SPEC.loader.exec_module(operator_cli)
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
 
 
@@ -50,6 +56,8 @@ class ServoBus:
         self.failure = None
         self.drop_goals = False
         self.stall = {}  # motor ID -> encoder position where an object blocks a goal
+        self.goal_bias = {}  # motor ID -> stable position error under load, in encoder ticks
+        self.disable_on_goal = set()  # motor IDs that lose torque after a target is accepted
         self.response_delay = 0
         self.done = threading.Event()
         self.thread = threading.Thread(target=self.run, daemon=True)
@@ -89,9 +97,14 @@ class ServoBus:
                         self.registers[motor_id][address : address + len(data)] = data
                         if address == 42 and self.registers[motor_id][40]:
                             stop = self.stall.get(motor_id)
-                            self.registers[motor_id][56:58] = (
-                                data[:2] if stop is None else stop.to_bytes(2, "little")
+                            position = (
+                                int.from_bytes(data[:2], "little") + self.goal_bias.get(motor_id, 0)
+                                if stop is None
+                                else stop
                             )
+                            self.word(motor_id, 56, position)
+                            if motor_id in self.disable_on_goal:
+                                self.registers[motor_id][40] = 0
                     payload = b""
                 elif instruction == 2:
                     address, width = parameters
@@ -188,8 +201,93 @@ class So101Tests(unittest.TestCase):
             self.assertAlmostEqual(state["joints_rad"][0], 2048 * 2 * math.pi / 4095 - math.pi)
             self.assertAlmostEqual(state["effector_positions"][0], (2750 - 2031) / 1437)
             self.assertTrue(state["effector_enabled"])
+            self.assertIs(state["joint_reference_verified"], True)
         self.assertTrue(self.bus.requests)
         self.assertTrue(all(instruction == 2 for _, instruction, _ in self.bus.requests))
+        self.assertEqual(self.bus.writes, [])
+
+    def test_joint_step_reports_device_timeout_after_a_partial_move(self):
+        self.gripper()
+        self.plan["device"]["arm"]["timeout_s"] = 10
+        self.save()
+        # The joint moves, then remains still outside the arrival tolerance. The CLI must allow
+        # the device deadline and confirmed hold to finish, retaining the structured result.
+        self.bus.stall[1] = 2055
+        context = SimpleNamespace(
+            plan=lambda unused: self.filename,
+            binary=lambda unused: CLI,
+            describe=lambda unused: json.loads(self.call("describe").stdout),
+        )
+        args = SimpleNamespace(
+            operation="joint-step", plan=None, joint="shoulder_pan", delta=0.05, speed=0.2
+        )
+        with self.assertRaisesRegex(DeviceCommandError, "point deadline exceeded") as failure:
+            operator_cli.joint_move(context, args)
+        self.assertEqual(failure.exception.result["status"], "timed_out")
+        self.assertEqual(int.from_bytes(self.bus.registers[1][56:58], "little"), 2055)
+        self.assertTrue(self.bus.writes)
+        self.assertTrue(all(address == 42 for _, address, _ in self.bus.writes))
+
+    def test_joint_step_preserves_other_goals_with_static_position_error(self):
+        self.gripper()
+        self.plan["device"]["arm"]["timeout_s"] = 0.3
+        self.save()
+        self.bus.word(3, 42, 2817)
+        self.bus.word(3, 56, 2826)
+        self.bus.goal_bias[3] = 9
+        other_goals = {
+            motor_id: bytes(self.bus.registers[motor_id][42:48]) for motor_id in range(2, 7)
+        }
+        with self.client() as client:
+            started = time.monotonic()
+            result = client.jog_arm(0, 0.05, 0.2)
+            self.assertLess(time.monotonic() - started, 1.0)
+            self.assertEqual(result["status"], "succeeded")
+            self.assertIn("target_reached", result["detail"])
+        self.assertEqual([(motor_id, address) for motor_id, address, _ in self.bus.writes], [(1, 42)])
+        self.assertEqual(int.from_bytes(self.bus.registers[1][56:58], "little"), 2081)
+        self.assertEqual(int.from_bytes(self.bus.registers[3][56:58], "little"), 2826)
+        for motor_id, goal in other_goals.items():
+            self.assertEqual(bytes(self.bus.registers[motor_id][42:48]), goal)
+
+    def test_joint_step_keeps_arrival_tolerance_for_the_selected_joint(self):
+        self.plan["device"]["arm"]["timeout_s"] = 0.1
+        self.save()
+        # A residual that is harmless on an uncommanded joint still prevents the selected joint
+        # from being reported as arrived. Keep the resulting fault latch and confirmed stop.
+        self.bus.goal_bias[1] = 9
+        with self.client() as client:
+            with self.assertRaisesRegex(DeviceCommandError, "point deadline exceeded") as failure:
+                client.jog_arm(0, 0.05, 0.2)
+            self.assertEqual(failure.exception.result["status"], "timed_out")
+            self.assertTrue(client.state()["latched"])
+
+    def test_joint_move_still_checks_arrival_on_every_joint(self):
+        self.plan["device"]["arm"]["timeout_s"] = 0.1
+        self.save()
+        self.bus.goal_bias[3] = 9
+        with self.client() as client:
+            with self.assertRaises(DeviceCommandError) as failure:
+                client.move_arm([0.05] * 5, 0.2)
+            self.assertIsInstance(failure.exception.result, dict)
+            self.assertEqual(failure.exception.result["status"], "timed_out")
+            self.assertTrue(client.state()["latched"])
+        self.assertEqual({motor_id for motor_id, _, _ in self.bus.writes}, set(range(1, 6)))
+
+    def test_joint_step_rejects_unsafe_inputs_and_other_joint_state_without_writes(self):
+        with self.client() as client:
+            for index, delta, speed in ((5, 0.05, 0.2), (0, 3, 0.2), (0, 0.05, 0.00001)):
+                with self.subTest(index=index, delta=delta, speed=speed):
+                    with self.assertRaises(DeviceCommandError):
+                        client.jog_arm(index, delta, speed)
+        for address, value in ((40, 0), (33, 1), (65, 0x04), (66, 1)):
+            with self.subTest(address=address):
+                before = self.bus.registers[3][address]
+                self.bus.registers[3][address] = value
+                with self.client() as client:
+                    with self.assertRaises(DeviceCommandError):
+                        client.jog_arm(0, 0.05, 0.2)
+                self.bus.registers[3][address] = before
         self.assertEqual(self.bus.writes, [])
 
     def test_missing_arm_calibration_allows_inspect_but_rejects_enable_and_move(self):
@@ -197,8 +295,11 @@ class So101Tests(unittest.TestCase):
         self.save()
         with self.client() as client:
             self.assertEqual(len(client.state()["joints_rad"]), 5)
+            self.assertIs(client.state()["joint_reference_verified"], False)
             with self.assertRaises(DeviceCommandError):
                 client.move_arm([0.1] * 5, 0.1)
+            with self.assertRaises(DeviceCommandError):
+                client.jog_arm(0, 0.05, 0.2)
             with self.assertRaises(DeviceCommandError):
                 client.enable_arm()
         self.assertEqual(self.bus.writes, [])
@@ -480,6 +581,90 @@ class So101Tests(unittest.TestCase):
                 client.move_effector([0])
             self.assertIn(raised.exception.result["status"], ("timed_out", "stop_unknown"))
 
+    def test_hand_move_reports_device_timeout_after_a_stalled_move(self):
+        self.gripper()
+        self.plan["device"]["effector"]["timeout_s"] = 10
+        self.save()
+        self.bus.stall[6] = 2600
+        context = SimpleNamespace(
+            plan=lambda unused: self.filename,
+            binary=lambda unused: CLI,
+            describe=lambda unused: json.loads(self.call("describe").stdout),
+        )
+        args = SimpleNamespace(plan=None, positions=[1.0], duration=0.05)
+        with self.assertRaises(DeviceCommandError) as failure:
+            operator_cli.hand_move(context, args)
+        self.assertIsInstance(failure.exception.result, dict)
+        self.assertEqual(failure.exception.result["status"], "timed_out")
+        self.assertTrue(self.bus.writes)
+        self.assertTrue(all((motor_id, address) == (6, 42) for motor_id, address, _ in self.bus.writes))
+
+    def test_gripper_opening_or_unchanged_target_cannot_report_a_grasp(self):
+        self.gripper()
+        self.plan["device"]["effector"]["timeout_s"] = 0.15
+        for closed, opened in ((2031, 3468), (3468, 2031)):
+            self.gripper_calibration.update(closed_ticks=closed, open_ticks=opened)
+            self.save()
+            span = opened - closed
+            for opening in (False, True):
+                with self.subTest(closed=closed, opening=opening):
+                    self.bus.goal_bias.clear()
+                    self.bus.word(6, 56, 2750)
+                    self.bus.word(6, 60, 300)
+                    with self.client() as client:
+                        # An opening overshoot, or drift after an unchanged goal, is not closing.
+                        # 0.5 rounds to the current encoder tick in either calibration direction.
+                        self.bus.goal_bias[6] = 60 if span > 0 else -60
+                        with self.assertRaises(DeviceCommandError) as failure:
+                            client.move_effector([0.7 if opening else 0.5], duration_s=0.05)
+                        self.assertEqual(failure.exception.result["status"], "timed_out")
+                        self.assertFalse(failure.exception.result["physical_grip_verified"])
+                        self.assertFalse(client.state()["effector_holding"])
+
+    def test_gripper_closing_grip_then_opening_replaces_direction_in_both_calibrations(self):
+        self.gripper()
+        self.plan["device"]["effector"]["timeout_s"] = 0.15
+        for closed, opened in ((2031, 3468), (3468, 2031)):
+            with self.subTest(closed=closed):
+                self.gripper_calibration.update(closed_ticks=closed, open_ticks=opened)
+                self.save()
+                span = opened - closed
+                self.bus.word(6, 56, 2750)
+                self.bus.word(6, 60, 300)
+                self.bus.stall[6] = round(closed + 0.3 * span)
+                with self.client() as client:
+                    result = client.move_effector([0], duration_s=0.05)
+                    self.assertEqual(result["detail"], "effector_grasp_holding")
+                    self.assertTrue(result["physical_grip_verified"])
+                    goals = len(self.bus.writes)
+                    self.assertEqual(client.hold_effector()["status"], "succeeded")
+                    self.assertEqual(len(self.bus.writes), goals, "holding rewrote the grasp goal")
+                    # Opening is blocked at the old position under load: never a closing grip.
+                    with self.assertRaises(DeviceCommandError) as failure:
+                        client.move_effector([1], duration_s=0.05)
+                    self.assertEqual(failure.exception.result["status"], "timed_out")
+                    self.assertFalse(client.state()["effector_holding"])
+                self.bus.stall.clear()
+
+    def test_gripper_torque_loss_after_submission_faults_before_arrival_or_timeout(self):
+        self.gripper()
+        for stalled in (False, True):
+            with self.subTest(stalled=stalled):
+                self.bus.registers[6][40] = 1
+                self.bus.word(6, 56, 2750)
+                self.bus.stall = {6: 2750} if stalled else {}
+                self.bus.disable_on_goal.add(6)
+                with self.client() as client:
+                    started = time.monotonic()
+                    with self.assertRaises(DeviceCommandError) as failure:
+                        client.move_effector([0.7], duration_s=0.05)
+                    self.assertLess(time.monotonic() - started, 1.0)
+                    self.assertEqual(failure.exception.result["status"], "stop_unknown")
+                    self.assertIn("disabled", failure.exception.result["detail"])
+                    state = client.state()
+                    self.assertFalse(state["effector_enabled"])
+                    self.assertTrue(state["latched"])
+
     def test_unconfigured_gripper_protection_refuses_enable_without_writes(self):
         self.gripper()
         self.bus.registers[6][40] = 0
@@ -615,19 +800,17 @@ class BusTests(unittest.TestCase):
 
     def test_capture_and_all_keep_an_existing_site_file_without_bus_traffic(self):
         for operation in ("capture", "all"):
-            with (
-                self.subTest(operation=operation),
-                tempfile.TemporaryDirectory(prefix="so101-site-") as site,
-            ):
-                (Path(site) / "so101").mkdir()
-                (Path(site) / "so101/so101_gripper_calibration.json").write_text("{}")
-                result = self.tool(operation, site=site)
-                self.assertEqual(result.returncode, 1)
-                self.assertIn("existing calibration kept", result.stderr)
-                self.assertEqual(
-                    (Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}"
-                )
-                self.assertFalse((Path(site) / "so101/so101_calibration.json").exists())
+            with self.subTest(operation=operation):
+                with tempfile.TemporaryDirectory(prefix="so101-site-") as site:
+                    (Path(site) / "so101").mkdir()
+                    (Path(site) / "so101/so101_gripper_calibration.json").write_text("{}")
+                    result = self.tool(operation, site=site)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("existing calibration kept", result.stderr)
+                    self.assertEqual(
+                        (Path(site) / "so101/so101_gripper_calibration.json").read_text(), "{}"
+                    )
+                    self.assertFalse((Path(site) / "so101/so101_calibration.json").exists())
         self.assertEqual(self.bus.requests, [])
 
     def test_lost_write_is_reported_though_the_servo_acknowledged_it(self):

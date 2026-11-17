@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!-- Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+     SPDX-License-Identifier: Apache-2.0 -->
+<robot name="kinematics_chain">
+  <link name="world"/>
+  <link name="base"/>
+  <link name="upper"/>
+  <link name="lower"/>
+  <link name="tip"/>
+  <link name="finger"/>
+  <link name="sibling"/>
+  <joint name="sibling_mount" type="fixed">
+    <parent link="world"/><child link="sibling"/>
+  </joint>
+  <joint name="mount" type="fixed">
+    <parent link="world"/><child link="base"/>
+    <origin xyz="2 3 4" rpy="0 0 1.5707963267948966"/>
+  </joint>
+  <joint name="shoulder" type="revolute">
+    <parent link="base"/><child link="upper"/><axis xyz="0 0 1"/>
+    <limit lower="-2.5" upper="2.5" effort="1" velocity="1"/>
+  </joint>
+  <joint name="elbow" type="revolute">
+    <parent link="upper"/><child link="lower"/><origin xyz="1 0 0"/>
+    <axis xyz="0 0 1"/><limit lower="-2.5" upper="2.5" effort="1" velocity="1"/>
+  </joint>
+  <joint name="tool" type="fixed">
+    <parent link="lower"/><child link="tip"/><origin xyz="1 0 0"/>
+  </joint>
+  <joint name="gripper" type="revolute">
+    <parent link="tip"/><child link="finger"/><axis xyz="0 0 1"/>
+    <limit lower="-1" upper="1" effort="1" velocity="1"/>
+  </joint>
+</robot>

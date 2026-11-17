@@ -132,6 +132,12 @@ class DeviceTests(unittest.TestCase):
             described.pop("arm_timeout_s"), self.plan["device"]["arm"].get("timeout_s", 5)
         )
         self.assertEqual(
+            described.pop("arm_tolerance_rad"), self.plan["device"]["arm"].get("tolerance_rad", 0.01)
+        )
+        self.assertEqual(
+            described.pop("effector_timeout_s"), self.plan["device"]["effector"].get("timeout_s", 5)
+        )
+        self.assertEqual(
             described,
             dict(
                 driver="mock_device",

@@ -1,0 +1,23 @@
+# Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+# SPDX-License-Identifier: Apache-2.0
+schema_version: 1
+scene: scene.xml
+initial_keyframe: home
+arm:
+    - {joint: shoulder_pan_joint, actuator: shoulder_pan, max_velocity_rad_s: 1.0}
+    - {joint: shoulder_lift_joint, actuator: shoulder_lift, max_velocity_rad_s: 1.0}
+    - {joint: elbow_joint, actuator: elbow, max_velocity_rad_s: 1.0}
+    - {joint: wrist_1_joint, actuator: wrist_1, max_velocity_rad_s: 1.0}
+    - {joint: wrist_2_joint, actuator: wrist_2, max_velocity_rad_s: 1.0}
+    - {joint: wrist_3_joint, actuator: wrist_3, max_velocity_rad_s: 1.0}
+effector:
+    - channel: gripper
+      joint: gripper_right_driver_joint
+      actuator: gripper_fingers_actuator
+      joint_closed: 0.8
+      joint_open: 0.0
+      control_closed: 255.0
+      control_open: 0.0
+arm_moving_threshold_rad_s: 0.002
+effector_moving_threshold: 0.002
+hold_timeout_s: 2.0

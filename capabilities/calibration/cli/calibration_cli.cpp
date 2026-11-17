@@ -36,8 +36,8 @@ int main(int argc, char** argv) {
                 "manipulation-calibration solve DATASET [--max-error-mm MM] [--max-error-deg DEG]";
         if (argc < 3 || argc % 2 == 0 || std::string(argv[1]) != "solve")
             throw std::runtime_error(usage);
-        double max_translation_m = m::kDefaultMaxTranslationM,
-               max_rotation_rad = m::kDefaultMaxRotationRad;
+        double max_translation_m = m::kDefaultMaxTranslationM;
+        double max_rotation_rad = m::kDefaultMaxRotationRad;
         for (int i = 3; i < argc; i += 2) {
             const std::string option = argv[i];
             const double value = std::stod(argv[i + 1]);
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
         const auto root = documents.front();
         Keys(root, {"schema_version", "setup", "samples"});
         if (root["schema_version"].as<int>() != 1 ||
-            root["setup"].as<std::string>() != "eye_to_hand" || !root["samples"].IsSequence())
+                root["setup"].as<std::string>() != "eye_to_hand" || !root["samples"].IsSequence())
             throw std::runtime_error("requires v1 eye_to_hand samples");
         std::vector<m::CalibrationSample> samples;
         for (const auto& sample : root["samples"]) {
@@ -63,20 +63,20 @@ int main(int argc, char** argv) {
             samples.push_back({Pose(sample["T_base_flange"]), Pose(sample["T_camera_target"])});
         }
         const auto result = m::SolveEyeToHand(samples, max_translation_m, max_rotation_rad);
-        std::cout << std::setprecision(17)
-                  << "{\"schema_version\":1,\"setup\":\"eye_to_hand\",\"T_base_camera\":[";
+        std::cout << std::setprecision(17);
+        std::cout << "{\"schema_version\":1,\"setup\":\"eye_to_hand\",\"T_base_camera\":[";
         for (std::size_t i = 0; i < 16; ++i) {
             if (i) std::cout << ',';
             std::cout << result.base_from_camera[i];
         }
-        std::cout << "],\"quality_passed\":" << (result.quality_passed ? "true" : "false")
-                  << ",\"holdout_translation_m\":" << result.holdout_translation_m
-                  << ",\"holdout_rotation_rad\":" << result.holdout_rotation_rad
-                  << ",\"maximum_translation_m\":" << result.maximum_translation_m
-                  << ",\"maximum_rotation_rad\":" << result.maximum_rotation_rad
-                  << ",\"threshold_translation_m\":" << result.threshold_translation_m
-                  << ",\"threshold_rotation_rad\":" << result.threshold_rotation_rad
-                  << ",\"sample_count\":" << samples.size() << "}\n";
+        std::cout << "],\"quality_passed\":" << (result.quality_passed ? "true" : "false");
+        std::cout << ",\"holdout_translation_m\":" << result.holdout_translation_m;
+        std::cout << ",\"holdout_rotation_rad\":" << result.holdout_rotation_rad;
+        std::cout << ",\"maximum_translation_m\":" << result.maximum_translation_m;
+        std::cout << ",\"maximum_rotation_rad\":" << result.maximum_rotation_rad;
+        std::cout << ",\"threshold_translation_m\":" << result.threshold_translation_m;
+        std::cout << ",\"threshold_rotation_rad\":" << result.threshold_rotation_rad;
+        std::cout << ",\"sample_count\":" << samples.size() << "}\n";
         return result.quality_passed ? 0 : 1;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

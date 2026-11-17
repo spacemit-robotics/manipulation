@@ -1,10 +1,11 @@
 // Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
 // SPDX-License-Identifier: Apache-2.0
 // Internal arm execution used by DeviceSession. Not installed.
-#ifndef MANIPULATION_CORE_ARM_SESSION_H_
-#define MANIPULATION_CORE_ARM_SESSION_H_
+#ifndef ARM_SESSION_H
+#define ARM_SESSION_H
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "manipulation/arm.h"
@@ -20,6 +21,9 @@ void PrepareLockDirectory(const std::string& directory);
 class ArmSession {
 public:
     ArmSession(DeviceConfig config, std::unique_ptr<Arm> arm, std::string lock_directory);
+    // Acquire all assembly resources before connecting the arm; rollback all on failure.
+    ArmSession(DeviceConfig config, std::unique_ptr<Arm> arm, std::string lock_directory,
+            std::vector<std::string> additional_resources);
     ~ArmSession();
     ArmSession(const ArmSession&) = delete;
     ArmSession& operator=(const ArmSession&) = delete;
@@ -32,6 +36,9 @@ public:
     void Disable();
     CommandResult Hold();
     CommandResult Submit(const JointPoint& point);
+    // Native single-joint point: only the selected joint has an arrival target; the whole arm
+    // must still report fresh, healthy, stationary feedback inside its configured limits.
+    CommandResult Jog(std::size_t joint_index, double delta_rad, double speed_scale);
     // Sends the target and completes at once; the next target may start while the arm moves.
     CommandResult Follow(const JointPoint& point);
     CommandResult SubmitPath(const JointPath& path);  // Completion is judged at the last waypoint.
@@ -53,11 +60,12 @@ private:
     enum class Completion { kArrival, kDelivered, kWithinTolerance };
     template <typename Extra, typename Write>
     CommandResult Begin(const JointPoint& final_point, double tolerance_rad, Completion completion,
-                        Extra extra_time_s, Write write);
+            Extra extra_time_s, Write write,
+            std::optional<std::size_t> arrival_joint = std::nullopt);
     void Stop(Result result, const std::string& detail);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_CORE_ARM_SESSION_H_
+#endif  // ARM_SESSION_H

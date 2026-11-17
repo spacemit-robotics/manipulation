@@ -142,9 +142,8 @@ def check(prefix):
             assert not Path(value).is_absolute() and resolved.is_relative_to(prefix), (key, value)
             assert resolved.as_posix().endswith(expected) and resolved.exists(), (key, resolved)
         command("manipulation", "validate")  # Offline validation of Nero resources is safe.
-        command(
-            "manipulation", "configure", "nero", expected=2, error="manipulation use nero"
-        )  # Never overwrites.
+        assert "selected existing configuration" in command("manipulation", "configure", "nero")
+        assert (site / "nero/device.yaml").read_text() == device
         # SO101 templates name the calibration files so101-calibrate keeps beside the SO101
         # configuration.
         command(
@@ -189,6 +188,106 @@ def check(prefix):
         assert 'arm_calibration: "so101_calibration.json"' in (site / "device.yaml").read_text()
         # `use` lists the configured devices and switches among them; each keeps its own files.
         assert command("manipulation", "use") == "  nero\n* so101\n"
+        write(site / "nero/pose_01.json", {"joints_rad": [0] * 7})
+
+        def site_files():
+            return {
+                str(path.relative_to(site)): path.read_bytes()
+                for path in site.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            }
+
+        preserved = site_files()
+        for options in (
+            ("--variant", "revo2_right"),
+            (),
+            ("--set", "channel=can2", "--python", "unused-interpreter"),
+        ):
+            command("manipulation", "use", "so101")
+            output = command("manipulation", "configure", "nero", *options)
+            assert "selected existing configuration" in output
+            assert "configuration unchanged" in output and "are not applied" in output
+            assert "current device: nero" in output
+            assert os.readlink(site / "device.yaml") == "nero/device.yaml"
+            assert site_files() == preserved
+            command("manipulation", "validate")
+        # Existing SO101 resources are reused without asking for template-only --set port.
+        command("manipulation", "configure", "so101")
+        assert os.readlink(site / "device.yaml") == "so101/device.yaml"
+        assert site_files() == preserved
+
+        nero = site / "nero/device.yaml"
+        archived = root / "archive/saved/device.yaml"
+        write(archived, device)
+        nero.unlink()
+        nero.symlink_to("../../archive/saved/device.yaml")
+        linked_files = site_files()
+        output = command("manipulation", "configure", "nero", "--variant", "revo2_right")
+        assert "selected existing configuration" in output
+        assert command("manipulation", "use") == "* nero\n  so101\n"
+        selection = site / "device.yaml"
+        selection.unlink()
+        selection.symlink_to(site / ".." / site.name / "nero/device.yaml")
+        assert command("manipulation", "use") == "* nero\n  so101\n"
+        assert command("manipulation", "--site", site / ".." / site.name, "use") == (
+            "* nero\n  so101\n"
+        )
+        # A manually selected external configuration retains its original fallback name.
+        external_name = site / "saved/device.yaml"
+        external_name.parent.mkdir()
+        external_name.symlink_to(archived)
+        selection.unlink()
+        selection.symlink_to(archived)
+        assert command("manipulation", "use") == "  nero\n* saved\n  so101\n"
+        external_name.unlink()
+        external_name.parent.rmdir()
+        assert os.readlink(nero) == "../../archive/saved/device.yaml"
+        assert archived.read_text() == device and site_files() == linked_files
+        nero.unlink()
+        nero.write_text(device)
+        command("manipulation", "use", "so101")
+        assert site_files() == preserved
+
+        arm_only = re.sub(r"(?ms)^    effector:\n.*?(?=^    options:)", "", device)
+        assert arm_only != device
+        nero.write_text(arm_only)
+        arm_files = site_files()
+        output = command("manipulation", "configure", "nero", "--variant", "revo2_right")
+        assert "configuration unchanged" in output and "are not applied" in output
+        assert site_files() == arm_files
+        described = subprocess.run(
+            [str(binary / "manipulation-device"), "describe", str(nero)],
+            cwd=root, env=environment, capture_output=True, text=True, check=True,
+        )
+        assert json.loads(described.stdout)["channels"] == []
+        nero.write_text(device)
+        command("manipulation", "use", "so101")
+
+        def rejected_configure(*arguments, error=None):
+            before = site_files()
+            command("manipulation", "configure", *arguments, expected=2, error=error)
+            assert os.readlink(site / "device.yaml") == "so101/device.yaml"
+            assert site_files() == before
+
+        rejected_configure("nero", "--set", "channel", error="expected NAME=VALUE")
+        for name in (".", "..", "../nero", str(site / "nero")):
+            rejected_configure(name, error="single directory name")
+        nero.write_text("[")
+        rejected_configure("nero")
+        nero.write_text(device.replace("model: nero", "model: so101"))
+        rejected_configure("nero", error="for model 'so101'")
+        nero.unlink()
+        nero.mkdir()
+        rejected_configure("nero", error="configuration path is not a file")
+        assert nero.is_dir()
+        nero.rmdir()
+        nero.symlink_to("missing.yaml")
+        rejected_configure("nero", error="configuration path is not a file")
+        assert os.readlink(nero) == "missing.yaml"
+        nero.unlink()
+        nero.write_text(device)
+        assert site_files() == preserved
+
         assert command("manipulation", "use", "nero") == "* nero\n  so101\n"
         assert "agx_can1" in (site / "device.yaml").read_text()
         command("manipulation", "use", "missing", expected=2, error="configured: nero, so101")

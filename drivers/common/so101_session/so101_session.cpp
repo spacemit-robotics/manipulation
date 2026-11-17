@@ -6,7 +6,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cmath>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17): target explicitly requires C++17.
 #include <set>
 #include <sstream>
 #include <system_error>
@@ -16,8 +16,8 @@
 namespace spacemit::manipulation::so101 {
 namespace {
 constexpr double kPi = 3.14159265358979323846;
-const std::array<std::string, kArmJoints> kJointNames{"shoulder_pan", "shoulder_lift", "elbow_flex",
-                                                      "wrist_flex", "wrist_roll"};
+const std::array<std::string, kArmJoints> kJointNames{
+        "shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"};
 
 void Require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error("SO101: " + message);
@@ -87,16 +87,12 @@ int JointTicks(double radians) {
 }
 
 Settings Parse(const DeviceDefinition& definition, const DriverOptions& options) {
-    const std::set<std::string> keys{"port",
-                                     "arm_ids",
-                                     "gripper_id",
-                                     "arm_calibration",
-                                     "gripper_calibration",
-                                     "max_velocity_rad_s",
-                                     "grip_load_threshold"};
+    const std::set<std::string> keys{"port", "arm_ids", "gripper_id", "arm_calibration",
+            "gripper_calibration", "max_velocity_rad_s", "grip_load_threshold"};
     for (const auto& entry : options)
         Require(keys.count(entry.first), "unknown option: " + entry.first);
     Settings settings;
+    settings.arm_present = !definition.arm.joints.empty();
     settings.port = Value(options, "port");
     Require(!settings.port.empty(), "port is required");
     settings.gripper_id = Unsigned(Value(options, "gripper_id", "6"), 253);
@@ -118,9 +114,12 @@ Settings Parse(const DeviceDefinition& definition, const DriverOptions& options)
     Require(index == kArmJoints && !Value(options, "arm_ids", "1,2,3,4,5").empty() &&
                     Value(options, "arm_ids", "1,2,3,4,5").back() != ',',
             "arm_ids must contain five IDs");
-    Require(!seen.count(settings.gripper_id), "arm and gripper IDs overlap");
-    Require(definition.arm.joints.size() == kArmJoints, "requires five arm joints");
-    for (size_t i = 0; i < kArmJoints; ++i) {
+    Require(!settings.arm_present || definition.effector.channels.empty() ||
+                    !seen.count(settings.gripper_id),
+            "arm and gripper IDs overlap");
+    Require(!settings.arm_present || definition.arm.joints.size() == kArmJoints,
+            "requires five arm joints");
+    for (size_t i = 0; settings.arm_present && i < kArmJoints; ++i) {
         const auto& joint = definition.arm.joints[i];
         Require(joint.name == kJointNames[i], "joint names/order do not match SO101");
         Require(joint.minimum_rad >= -kPi && joint.maximum_rad < kPi,
@@ -128,6 +127,7 @@ Settings Parse(const DeviceDefinition& definition, const DriverOptions& options)
     }
     const std::string arm_path = Value(options, "arm_calibration");
     if (!arm_path.empty()) {
+        Require(settings.arm_present, "arm_calibration requires an arm");
         const auto calibration = CalibrationFile(arm_path);
         Require(calibration.size() == kArmJoints, "arm calibration must contain five named joints");
         for (size_t i = 0; i < kArmJoints; ++i) {
@@ -190,7 +190,8 @@ SharedSession::~SharedSession() {
 void SharedSession::Connect() {
     std::lock_guard<std::mutex> guard(mutex_);
     if (!bus_) {
-        std::vector<uint8_t> ids(settings_.ids.begin(), settings_.ids.end());
+        std::vector<uint8_t> ids;
+        if (settings_.arm_present) ids.assign(settings_.ids.begin(), settings_.ids.end());
         if (settings_.gripper_calibrated) ids.push_back(settings_.gripper_id);
         bus_ = feetech_bus_open(settings_.port.c_str(), ids.data(), ids.size());
         if (!bus_) throw std::system_error(errno, std::generic_category(), "open SO101 serial bus");
@@ -210,8 +211,8 @@ std::vector<uint8_t> SharedSession::Registers(uint8_t id, uint8_t address, size_
     Require(bus_ != nullptr, "not connected");
     std::vector<uint8_t> bytes(count);
     if (feetech_bus_read(bus_, id, address, bytes.data(), bytes.size()) != 0) {
-        throw std::system_error(errno, std::generic_category(),
-                                "read SO101 motor " + std::to_string(id));
+        throw std::system_error(
+                errno, std::generic_category(), "read SO101 motor " + std::to_string(id));
     }
     return bytes;
 }
@@ -247,14 +248,13 @@ Sample SharedSession::Read(uint8_t id) {
 void SharedSession::Write(uint8_t id, uint8_t address, const std::vector<uint8_t>& bytes) {
     if (feetech_bus_write(bus_, id, address, bytes.data(), bytes.size()) != 0) {
         throw std::system_error(errno, std::generic_category(),
-                                "register " + std::to_string(address) +
-                                        " write was not confirmed for SO101 motor " +
-                                        std::to_string(id));
+                "register " + std::to_string(address) +
+                        " write was not confirmed for SO101 motor " + std::to_string(id));
     }
 }
 
 void SharedSession::Target(const std::vector<uint8_t>& ids, const std::vector<int>& ticks,
-                           const std::vector<double>& velocities) {
+        const std::vector<double>& velocities) {
     std::lock_guard<std::mutex> guard(mutex_);
     Require(bus_ != nullptr, "not connected");
     Require(ids.size() == ticks.size() && ids.size() == velocities.size(), "target size mismatch");
@@ -266,8 +266,8 @@ void SharedSession::Target(const std::vector<uint8_t>& ids, const std::vector<in
         const int speed = static_cast<int>(std::floor(velocities[i] / kSpeedTickRadS));
         // SRAM goal position / time=0 / speed. Acceleration and EEPROM remain as installed.
         Write(ids[i], 42,
-              {static_cast<uint8_t>(ticks[i] & 255), static_cast<uint8_t>(ticks[i] >> 8), 0, 0,
-               static_cast<uint8_t>(speed & 255), static_cast<uint8_t>(speed >> 8)});
+                {static_cast<uint8_t>(ticks[i] & 255), static_cast<uint8_t>(ticks[i] >> 8), 0, 0,
+                        static_cast<uint8_t>(speed & 255), static_cast<uint8_t>(speed >> 8)});
     }
 }
 

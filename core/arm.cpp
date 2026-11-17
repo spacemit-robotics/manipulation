@@ -44,25 +44,26 @@ void PrepareLockDirectory(const std::string& directory) {
         Check(chmod(directory.c_str(), 01777) == 0, "cannot set shared lock directory mode");
     } else if (errno != EEXIST) {
         throw std::runtime_error("cannot create lock directory " + directory +
-                                 "; set MANIPULATION_LOCK_DIRECTORY at build time");
+                "; set MANIPULATION_LOCK_DIRECTORY at build time");
     }
 
     struct stat info {};
 
     Check(lstat(directory.c_str(), &info) == 0 && S_ISDIR(info.st_mode),
-          "lock directory is not a directory");
+            "lock directory is not a directory");
     // Without the sticky bit another account could unlink a held lease and become a second owner.
     const bool sticky = info.st_mode & S_ISVTX;
     Check(sticky || !(info.st_mode & (S_IWGRP | S_IWOTH)), "shared lock directory must be sticky");
     Check(sticky || info.st_uid == geteuid() || info.st_uid == 0,
-          "lock directory owned by another account");
+            "lock directory owned by another account");
 }
 
 struct ArmSession::Impl {
     DeviceConfig config;
     std::unique_ptr<Arm> arm;
     std::string directory;
-    int lease = -1;
+    std::vector<std::string> resources;
+    std::vector<int> leases;
     bool connected = false;
     CommandResult result;
     JointPoint point;
@@ -72,6 +73,7 @@ struct ArmSession::Impl {
     unsigned settled_samples = 0;
     double tolerance = 0;  // Arrival tolerance of the running command.
     Completion completion = Completion::kArrival;
+    std::optional<std::size_t> arrival_joint;
     bool settling = false;
 };
 
@@ -89,6 +91,10 @@ ArmState Arm::Diagnose() {
 
 void Arm::SubmitPath(const JointPath&) {
     throw CommandRejected("joint path unsupported");
+}
+
+void Arm::SubmitJoint(std::size_t, double, double) {
+    throw CommandRejected("single-joint point unsupported");
 }
 
 void Arm::SubmitTrajectory(const JointTrajectory&) {
@@ -109,10 +115,14 @@ double JointPathDuration(const std::vector<double>& start_rad, const JointPath& 
         previous = &waypoint;
     }
     return std::max({0.3, 1.875 * distance / path.max_velocity_rad_s,
-                     std::sqrt(5.774 * distance / path.max_acceleration_rad_s2)});
+            std::sqrt(5.774 * distance / path.max_acceleration_rad_s2)});
 }
 
 ArmSession::ArmSession(DeviceConfig config, std::unique_ptr<Arm> arm, std::string lock_directory)
+    : ArmSession(std::move(config), std::move(arm), std::move(lock_directory), {}) {}
+
+ArmSession::ArmSession(DeviceConfig config, std::unique_ptr<Arm> arm, std::string lock_directory,
+        std::vector<std::string> additional_resources)
     : impl_(std::make_unique<Impl>()) {
     ValidateDevice(config);
     Check(arm != nullptr, "arm required");
@@ -120,6 +130,13 @@ ArmSession::ArmSession(DeviceConfig config, std::unique_ptr<Arm> arm, std::strin
     impl_->config = std::move(config);
     impl_->arm = std::move(arm);
     impl_->directory = std::move(lock_directory);
+    additional_resources.push_back(impl_->config.resource_id);
+    std::sort(additional_resources.begin(), additional_resources.end());
+    additional_resources.erase(
+            std::unique(additional_resources.begin(), additional_resources.end()),
+            additional_resources.end());
+    impl_->resources = std::move(additional_resources);
+    impl_->leases.reserve(impl_->resources.size());
 }
 
 ArmSession::~ArmSession() {
@@ -130,28 +147,30 @@ void ArmSession::Connect() {
     auto& p = *impl_;
     Check(!p.connected, "already connected");
     PrepareLockDirectory(p.directory);
-    const auto path = std::filesystem::path(p.directory) / (p.config.resource_id + ".lock");
-    p.lease = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
-    Check(p.lease >= 0, "cannot open lease; create trusted lock directory first");
-
-    struct stat info {};
-
-    if (fstat(p.lease, &info) != 0 || !S_ISREG(info.st_mode) ||
-        flock(p.lease, LOCK_EX | LOCK_NB) != 0) {
-        close(p.lease);
-        p.lease = -1;
-        throw std::runtime_error("device resource busy or invalid lease");
-    }
+    bool connection_attempted = false;
     try {
+        for (const auto& resource : p.resources) {
+            const auto path = std::filesystem::path(p.directory) / (resource + ".lock");
+            const int lease = open(path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+            Check(lease >= 0, "cannot open lease; create trusted lock directory first");
+            p.leases.push_back(lease);
+
+            struct stat info {};
+
+            Check(fstat(lease, &info) == 0 && S_ISREG(info.st_mode) &&
+                            flock(lease, LOCK_EX | LOCK_NB) == 0,
+                    "device resource busy or invalid lease");
+        }
+        connection_attempted = true;
         p.arm->Connect();
         p.connected = true;
         Read();
         p.result = {};
     } catch (...) {
-        p.arm->Disconnect();
+        if (connection_attempted) p.arm->Disconnect();
         p.connected = false;
-        close(p.lease);
-        p.lease = -1;
+        for (const int lease : p.leases) close(lease);
+        p.leases.clear();
         throw;
     }
 }
@@ -169,10 +188,8 @@ void ArmSession::Disconnect() noexcept {
         p.connected = false;
     }
     p.settling = false;
-    if (p.lease >= 0) {
-        close(p.lease);
-        p.lease = -1;
-    }
+    for (const int lease : p.leases) close(lease);
+    p.leases.clear();
 }
 
 ArmState ArmSession::Read() {
@@ -181,7 +198,7 @@ ArmState ArmSession::Read() {
     auto state = p.arm->Read();
     const double age = std::chrono::duration<double>(Clock::now() - state.received_at).count();
     Check(state.valid && state.sample_id > 0 && age >= 0 && age <= p.config.maximum_age_s,
-          "incomplete or stale arm feedback");
+            "incomplete or stale arm feedback");
     Check(state.joints_rad.size() == p.config.joints.size(), "arm feedback joint count mismatch");
     for (double q : state.joints_rad) Check(std::isfinite(q), "nonfinite arm feedback");
     if (!state.moving && p.result.status != Result::kRunning)
@@ -193,7 +210,7 @@ void ArmSession::Ready() {
     const auto status = impl_->result.status;
     Check(status != Result::kRunning, "arm busy");
     Check(status != Result::kFault && status != Result::kTimedOut && status != Result::kStopUnknown,
-          "fault latched; inspect before reconnecting");
+            "fault latched; inspect before reconnecting");
 }
 
 ArmState ArmSession::Diagnose() {
@@ -281,12 +298,11 @@ CommandResult ArmSession::Hold() {
     } catch (...) {
     }
     if (!confirmed && failure.empty()) failure = "arm hold unconfirmed";
-    CommandResult result{
-            p.result.command_id + 1, confirmed ? Result::kSucceeded : Result::kStopUnknown,
+    CommandResult result{p.result.command_id + 1,
+            confirmed ? Result::kSucceeded : Result::kStopUnknown,
             confirmed ? "arm_hold_confirmed" : failure + "; inspect before reconnecting"};
     const bool latched = p.result.status == Result::kFault ||
-                         p.result.status == Result::kTimedOut ||
-                         p.result.status == Result::kStopUnknown;
+            p.result.status == Result::kTimedOut || p.result.status == Result::kStopUnknown;
     if (!confirmed || !latched) p.result = result;
     if (confirmed) p.settling = false;
     return result;
@@ -297,42 +313,44 @@ void ArmSession::CheckTarget(const std::vector<double>& target_rad, double speed
     const auto capabilities = p.arm->GetCapabilities();
     Check(target_rad.size() == p.config.joints.size(), "target joint count mismatch");
     Check(std::isfinite(speed_scale) && speed_scale > 0 && speed_scale <= 1,
-          "speed_scale must be in (0, 1]");
+            "speed_scale must be in (0, 1]");
     Check(speed_scale >= capabilities.minimum_speed_scale, "speed_scale below driver minimum");
     for (std::size_t i = 0; i < target_rad.size(); ++i) {
         const auto& joint = p.config.joints[i];
         if (!std::isfinite(target_rad[i]) || target_rad[i] < joint.minimum_rad ||
-            target_rad[i] > joint.maximum_rad) {
+                target_rad[i] > joint.maximum_rad) {
             throw std::runtime_error("target outside joint limits: " + joint.name + " " +
-                                     std::to_string(target_rad[i]) + " rad, allowed " +
-                                     std::to_string(joint.minimum_rad) + ".." +
-                                     std::to_string(joint.maximum_rad) + " rad");
+                    std::to_string(target_rad[i]) + " rad, allowed " +
+                    std::to_string(joint.minimum_rad) + ".." + std::to_string(joint.maximum_rad) +
+                    " rad");
         }
     }
 }
 
 template <typename Extra, typename Write>
 CommandResult ArmSession::Begin(const JointPoint& final_point, double tolerance_rad,
-                                Completion completion, Extra extra_time_s, Write write) {
+        Completion completion, Extra extra_time_s, Write write,
+        std::optional<std::size_t> arrival_joint) {
     auto& p = *impl_;
     auto state = Read();
     // Motion is allowed only when it is the arm settling after our own command that did not wait.
     Check(!state.fault && state.enabled && state.position_mode && (!state.moving || p.settling),
-          "arm must be normal, enabled, stationary and in position mode");
+            "arm must be normal, enabled, stationary and in position mode");
     const double extra_s = extra_time_s(state);  // May refuse the request: before any change.
     p.point = final_point;
     p.tolerance = tolerance_rad;
     p.completion = completion;
+    p.arrival_joint = arrival_joint;
     p.settling = false;
     p.last_sample = state.sample_id;
     p.settled_samples = 0;
     p.submitted_at = Clock::now();
-    p.deadline =
-            p.submitted_at + std::chrono::duration_cast<Clock::duration>(
-                                     std::chrono::duration<double>(p.config.timeout_s + extra_s));
+    p.deadline = p.submitted_at +
+            std::chrono::duration_cast<Clock::duration>(
+                    std::chrono::duration<double>(p.config.timeout_s + extra_s));
     const auto previous = p.result;
-    p.result = {p.result.command_id + 1, Result::kRunning,
-                "accepted; awaiting fresh target evidence"};
+    p.result = {
+            p.result.command_id + 1, Result::kRunning, "accepted; awaiting fresh target evidence"};
     try {
         write();
     } catch (const CommandRejected&) {
@@ -350,7 +368,7 @@ CommandResult ArmSession::Begin(const JointPoint& final_point, double tolerance_
 namespace {
 double ResolveTolerance(double requested, double device) {
     Check(std::isfinite(requested) && requested >= 0 && requested <= kMaximumPathTolerance,
-          "tolerance must be in [0, 0.8 deg]");
+            "tolerance must be in [0, 0.8 deg]");
     return requested == 0 ? device : requested;
 }
 }  // namespace
@@ -360,16 +378,36 @@ CommandResult ArmSession::Submit(const JointPoint& point) {
     Check(impl_->arm->GetCapabilities().joint_point, "joint point unsupported");
     CheckTarget(point.target_rad, point.speed_scale);
     Check(std::isfinite(point.resend_interval_s) &&
-                  (point.resend_interval_s == 0 ||
-                   (point.resend_interval_s >= kMinimumResendInterval &&
-                    point.resend_interval_s <= kMaximumResendInterval)),
-          "resend_interval_s must be 0 or in [0.02, 0.2] s");
+                    (point.resend_interval_s == 0 ||
+                            (point.resend_interval_s >= kMinimumResendInterval &&
+                                    point.resend_interval_s <= kMaximumResendInterval)),
+            "resend_interval_s must be 0 or in [0.02, 0.2] s");
     auto resolved = point;  // The driver receives the tolerance arrival is judged with.
     resolved.tolerance_rad = ResolveTolerance(point.tolerance_rad, impl_->config.tolerance_rad);
     return Begin(
             resolved, resolved.tolerance_rad,
             point.wait_for_arrival ? Completion::kArrival : Completion::kWithinTolerance,
             [](const ArmState&) { return 0.0; }, [&] { impl_->arm->Submit(resolved); });
+}
+
+CommandResult ArmSession::Jog(std::size_t joint_index, double delta_rad, double speed_scale) {
+    Ready();
+    if (!GetCapabilities().single_joint_point || joint_index >= impl_->config.joints.size() ||
+            !std::isfinite(delta_rad)) {
+        throw CommandRejected("invalid or unsupported single-joint jog");
+    }
+    JointPoint point;
+    point.speed_scale = speed_scale;
+    return Begin(
+            point, impl_->config.tolerance_rad, Completion::kArrival,
+            [&](const ArmState& state) {
+                point.target_rad = state.joints_rad;
+                point.target_rad[joint_index] += delta_rad;
+                CheckTarget(point.target_rad, speed_scale);
+                return 0.0;
+            },
+            [&] { impl_->arm->SubmitJoint(joint_index, point.target_rad[joint_index], speed_scale); },
+            joint_index);
 }
 
 CommandResult ArmSession::Follow(const JointPoint& point) {
@@ -397,17 +435,17 @@ CommandResult ArmSession::SubmitTrajectory(const JointTrajectory& trajectory) {
     const auto& times = trajectory.times_s;
     const auto& knots = trajectory.positions_rad;
     Check(knots.size() >= 2 && knots.size() <= kMaximumTrajectoryKnots &&
-                  times.size() == knots.size(),
-          "trajectory needs 2..4000 knots with one time each");
+                    times.size() == knots.size(),
+            "trajectory needs 2..4000 knots with one time each");
     Check(std::isfinite(trajectory.command_rate_hz) && trajectory.command_rate_hz >= 20 &&
-                  trajectory.command_rate_hz <= 500,
-          "command_rate_hz must be in [20, 500]");
+                    trajectory.command_rate_hz <= 500,
+            "command_rate_hz must be in [20, 500]");
     Check(std::isfinite(trajectory.max_step_rad) && trajectory.max_step_rad > 0 &&
-                  trajectory.max_step_rad <= kMaximumTrajectoryStep * (1 + 1e-9),
-          "max_step_rad must be in (0, 3 deg]");
+                    trajectory.max_step_rad <= kMaximumTrajectoryStep * (1 + 1e-9),
+            "max_step_rad must be in (0, 3 deg]");
     Check(times.front() == 0 && std::isfinite(times.back()) &&
-                  times.back() <= kMaximumTrajectoryDuration,
-          "trajectory times must start at 0 and last at most 60 s");
+                    times.back() <= kMaximumTrajectoryDuration,
+            "trajectory times must start at 0 and last at most 60 s");
     const double tick = 1 / trajectory.command_rate_hz;
     for (std::size_t i = 0; i < knots.size(); ++i) {
         CheckTarget(knots[i], trajectory.speed_scale);
@@ -417,7 +455,7 @@ CommandResult ArmSession::SubmitTrajectory(const JointTrajectory& trajectory) {
         const double ticks = std::max(1.0, (times[i] - times[i - 1]) / tick);
         for (std::size_t j = 0; j < knots[i].size(); ++j) {
             Check(std::abs(knots[i][j] - knots[i - 1][j]) <= trajectory.max_step_rad * ticks + 1e-6,
-                  "trajectory step exceeds max_step_rad");
+                    "trajectory step exceeds max_step_rad");
         }
     }
     auto resolved = trajectory;
@@ -429,8 +467,8 @@ CommandResult ArmSession::SubmitTrajectory(const JointTrajectory& trajectory) {
             [&](const ArmState& state) {
                 for (std::size_t j = 0; j < knots.front().size(); ++j) {
                     Check(std::abs(state.joints_rad[j] - knots.front()[j]) <=
-                                  kTrajectoryStartTolerance,
-                          "trajectory must start at the current position (0.5 deg)");
+                                    kTrajectoryStartTolerance,
+                            "trajectory must start at the current position (0.5 deg)");
                 }
                 return times.back();
             },
@@ -441,13 +479,13 @@ CommandResult ArmSession::SubmitPath(const JointPath& path) {
     Ready();
     Check(impl_->arm->GetCapabilities().joint_path, "joint path unsupported");
     Check(!path.waypoints_rad.empty() && path.waypoints_rad.size() <= kMaximumPathWaypoints,
-          "joint path needs 1..128 waypoints");
+            "joint path needs 1..128 waypoints");
     Check(std::isfinite(path.max_velocity_rad_s) && path.max_velocity_rad_s > 0 &&
-                  path.max_velocity_rad_s <= kMaximumPathVelocity,
-          "path velocity must be in (0, 0.35] rad/s");
+                    path.max_velocity_rad_s <= kMaximumPathVelocity,
+            "path velocity must be in (0, 0.35] rad/s");
     Check(std::isfinite(path.max_acceleration_rad_s2) && path.max_acceleration_rad_s2 > 0 &&
-                  path.max_acceleration_rad_s2 <= kMaximumPathAcceleration,
-          "path acceleration must be in (0, 1] rad/s^2");
+                    path.max_acceleration_rad_s2 <= kMaximumPathAcceleration,
+            "path acceleration must be in (0, 1] rad/s^2");
     for (const auto& waypoint : path.waypoints_rad) CheckTarget(waypoint, path.speed_scale);
     auto resolved = path;  // The driver receives the tolerance arrival is judged with.
     resolved.tolerance_rad = ResolveTolerance(path.tolerance_rad, impl_->config.tolerance_rad);
@@ -480,7 +518,7 @@ CommandResult ArmSession::Poll() {
         }
         const auto state = Read();
         Check(!state.fault && state.enabled && state.position_mode,
-              "arm mode/enable/fault changed");
+                "arm mode/enable/fault changed");
         if (state.sample_id < p.last_sample)
             throw std::runtime_error("feedback sequence regressed");
         if (state.sample_id == p.last_sample || state.received_at <= p.submitted_at)
@@ -496,6 +534,13 @@ CommandResult ArmSession::Poll() {
         }
         bool within = !state.command_active;
         for (std::size_t i = 0; i < p.point.target_rad.size(); ++i) {
+            if (p.arrival_joint) {
+                const auto& limit = p.config.joints[i];
+                Check(state.joints_rad[i] >= limit.minimum_rad &&
+                                state.joints_rad[i] <= limit.maximum_rad,
+                        "arm feedback outside joint limits during jog");
+                if (i != *p.arrival_joint) continue;
+            }
             within = within && std::abs(state.joints_rad[i] - p.point.target_rad[i]) <= p.tolerance;
         }
         if (p.completion == Completion::kWithinTolerance) {

@@ -40,24 +40,24 @@ int main(int argc, char** argv) {
         Check(argc == 3, "test requires PLAN SCENARIO");
         const std::string scenario = argv[2];
         Check(scenario == "worker_exit" || scenario == "rpc_timeout" || scenario == "truncated" ||
-                      scenario == "fault" || scenario == "motor" || scenario == "disabled" ||
-                      scenario == "mode" || scenario == "stale" || scenario == "part",
-              "unknown test scenario");
+                        scenario == "fault" || scenario == "motor" || scenario == "disabled" ||
+                        scenario == "mode" || scenario == "stale" || scenario == "part",
+                "unknown test scenario");
         auto registry = m::MakeBuiltinDeviceRegistry();
         const auto plan = m::LoadDevicePlan(argv[1], registry);
         Check(plan.driver == "agx_nero_revo2" && !plan.definition.effector.channels.size(),
-              "recovery fixture requires the arm-only Nero adapter");
+                "recovery fixture requires the arm-only Nero adapter");
         const auto root = std::filesystem::canonical(plan.options.at("sdk_root"));
         std::ifstream marker(root / "TEST_FIXTURE_ONLY");
         std::string identity;
         std::getline(marker, identity);
         Check(identity == "manipulation-can-free-recovery-fixture", "refusing non-fixture SDK");
         Check(plan.options.at("channel").find("_recover") != std::string::npos,
-              "refusing non-fixture channel");
+                "refusing non-fixture channel");
         const auto control = root / "pyAgxArm" / "recovery.json";
         Control(control, "{\"mode\":\"normal\"}");
-        m::DeviceSession session(plan.definition,
-                                 registry.Create(plan.driver, plan.definition, plan.options));
+        m::DeviceSession session(
+                plan.definition, registry.Create(plan.driver, plan.definition, plan.options));
         session.Connect();
         session.Diagnose();
         const m::JointPoint target{std::vector<double>(7, 0.1), 0.01};
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
         Check(calls >= 2, "fault was not injected after submission");
         Check(m::Clock::now() - started < std::chrono::seconds(5), "unbounded failure handling");
         Check(failed.status == m::Result::kStopUnknown,
-              "unverified physical stop reported as known");
+                "unverified physical stop reported as known");
         Check(session.Latched(), "failure did not latch the assembly");
         Reject([&] { session.MoveArm(target); });
         Reject([&] { session.EnableArm(); });
@@ -87,10 +87,9 @@ int main(int argc, char** argv) {
         const auto actual = session.ReadArm();
         const std::vector<double> expected{0.125, -0.125, 0.25, -0.25, 0.375, -0.375, 0.5};
         Check(actual.joints_rad == expected && !actual.moving && !actual.fault,
-              "reconnect did not read independent actual state");
-        std::cout << "scenario=" << scenario
-                  << " result=stop_unknown latched=1 reconnect=idle"
-                     " actual_state_verified=1\n";
+                "reconnect did not read independent actual state");
+        std::cout << "scenario=" << scenario;
+        std::cout << " result=stop_unknown latched=1 reconnect=idle actual_state_verified=1\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

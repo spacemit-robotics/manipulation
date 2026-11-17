@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Public device/effector tools. No startup motion; `serve --read-only` for tools that only read.
 #include "manipulation/device_plan.h"
+#include "manipulation/capability.h"
 #include "arm_check.h"
 #include "device_service.h"
 #include <atomic>
@@ -33,8 +34,14 @@ int main(int argc, char** argv) {
             for (const auto& id : registry.List()) std::cout << id << '\n';
             return 0;
         }
+        if (argc == 2 && std::string(argv[1]) == "driver-roles") {
+            for (const auto& id : registry.ListArms()) std::cout << "arm " << id << '\n';
+            for (const auto& id : registry.ListEffectors()) std::cout << "effector " << id << '\n';
+            return 0;
+        }
         const std::string usage =
-                "manipulation-device drivers | validate PLAN | describe PLAN | capabilities PLAN | "
+                "manipulation-device drivers | driver-roles | validate PLAN | describe PLAN | "
+                "capabilities PLAN | "
                 "inspect PLAN |\n"
                 "    run PLAN [--enable] | serve PLAN [--read-only | --enable | --allow-disable |\n"
                 "    --allow-effector-enable | --allow-effector-disable] | arm-check PLAN "
@@ -51,19 +58,21 @@ int main(int argc, char** argv) {
         };
         for (const auto& item : flags) {
             if (item != "--read-only" && item != "--enable" && item != "--timeout-only" &&
-                item != "--allow-disable" && item != "--allow-effector-enable" &&
-                item != "--allow-effector-disable") {
+                    item != "--allow-disable" && item != "--allow-effector-enable" &&
+                    item != "--allow-effector-disable") {
                 throw std::runtime_error("unknown option " + item + "\n" + usage);
             }
         }
-        const bool read_only = has("--read-only"), enable = has("--enable"),
-                   timeout_only = has("--timeout-only");
-        const bool disable = has("--allow-disable"),
-                   effector_enable = has("--allow-effector-enable"),
-                   effector_disable = has("--allow-effector-disable");
+        const bool read_only = has("--read-only");
+        const bool enable = has("--enable");
+        const bool timeout_only = has("--timeout-only");
+        const bool disable = has("--allow-disable");
+        const bool effector_enable = has("--allow-effector-enable");
+        const bool effector_disable = has("--allow-effector-disable");
         // Read-only service for tools that must never move the device; every motion is refused.
         if (read_only &&
-            (operation != "serve" || enable || disable || effector_enable || effector_disable)) {
+                (operation != "serve" || enable || disable || effector_enable ||
+                        effector_disable)) {
             throw std::runtime_error(
                     "--read-only is a serve option and excludes torque permissions");
         }
@@ -73,15 +82,15 @@ int main(int argc, char** argv) {
         if (timeout_only && operation != "arm-check")
             throw std::runtime_error("--timeout-only is an arm-check option");
         if ((operation == "validate" || operation == "inspect" || operation == "describe" ||
-             operation == "capabilities") &&
-            !flags.empty()) {
+                    operation == "capabilities") &&
+                !flags.empty()) {
             throw std::runtime_error(usage);
         }
         if (operation == "arm-check" && enable)
             throw std::runtime_error("arm-check never enables the arm");
         if (operation != "validate" && operation != "describe" && operation != "inspect" &&
-            operation != "run" && operation != "serve" && operation != "arm-check" &&
-            operation != "capabilities") {
+                operation != "run" && operation != "serve" && operation != "arm-check" &&
+                operation != "capabilities") {
             throw std::runtime_error(usage);
         }
         const auto plan = m::LoadDevicePlan(argv[2], registry);
@@ -90,29 +99,40 @@ int main(int argc, char** argv) {
             return 0;
         }
         if (operation == "describe") {  // Offline metadata for tools; never opens the device.
-            std::cout << "{\"driver\":" << JsonString(plan.driver)
-                      << ",\"model\":" << JsonString(plan.model) << ",\"joints\":[";
+            std::cout << "{\"driver\":";
+            std::cout << JsonString(plan.driver.empty() ? "composed" : plan.driver);
+            std::cout << ",\"model\":" << JsonString(plan.model);
+            if (!plan.composition.arm_driver.empty()) {
+                std::cout << ",\"arm_driver\":" << JsonString(plan.composition.arm_driver);
+                std::cout << ",\"effector_driver\":";
+                std::cout << JsonString(plan.composition.effector_driver);
+                std::cout << ",\"arm_resource_id\":";
+                std::cout << JsonString(plan.definition.arm.resource_id);
+                std::cout << ",\"effector_resource_id\":";
+                std::cout << JsonString(plan.definition.effector.resource_id);
+            }
+            std::cout << ",\"joints\":[";
             for (std::size_t i = 0; i < plan.definition.arm.joints.size(); ++i) {
                 std::cout << (i ? "," : "") << JsonString(plan.definition.arm.joints[i].name);
             }
             std::cout << "],\"joint_limits_rad\":[";
             for (std::size_t i = 0; i < plan.definition.arm.joints.size(); ++i) {
                 const auto& joint = plan.definition.arm.joints[i];
-                std::cout << (i ? "," : "") << std::setprecision(17) << '[' << joint.minimum_rad
-                          << ',' << joint.maximum_rad << ']';
+                std::cout << (i ? "," : "") << std::setprecision(17) << '[' << joint.minimum_rad;
+                std::cout << ',' << joint.maximum_rad << ']';
             }
-            std::cout << "],\"arm_timeout_s\":" << plan.definition.arm.timeout_s
-                      << ",\"channels\":[";
+            std::cout << "],\"arm_timeout_s\":" << plan.definition.arm.timeout_s;
+            std::cout << ",\"arm_tolerance_rad\":" << plan.definition.arm.tolerance_rad;
+            std::cout << ",\"effector_timeout_s\":" << plan.definition.effector.timeout_s;
+            std::cout << ",\"channels\":[";
             for (std::size_t i = 0; i < plan.definition.effector.channels.size(); ++i) {
                 std::cout << (i ? "," : "") << JsonString(plan.definition.effector.channels[i]);
             }
-            std::cout << "],\"effector_feedback\":"
-                      << JsonString(plan.definition.effector.channels.empty() ? ""
-                                    : plan.definition.effector.feedback ==
-                                                    m::EffectorFeedback::kNone
-                                            ? "none"
-                                            : "position")
-                      << "}\n";
+            const auto& effector = plan.definition.effector;
+            const char* feedback =
+                    effector.feedback == m::EffectorFeedback::kNone ? "none" : "position";
+            if (effector.channels.empty()) feedback = "";
+            std::cout << "],\"effector_feedback\":" << JsonString(feedback) << "}\n";
             return 0;
         }
         std::signal(SIGINT, Signal);
@@ -123,8 +143,7 @@ int main(int argc, char** argv) {
             return m::RunArmCheck(
                     plan, registry, timeout_only, [] { return interrupted != 0; }, std::cout);
         }
-        m::DeviceSession session(plan.definition,
-                                 registry.Create(plan.driver, plan.definition, plan.options));
+        m::DeviceSession session(plan.definition, m::CreatePlanDevices(plan, registry));
         if (operation == "capabilities") {
             std::cout << DeviceCapabilitiesJson(session) << '\n';
             return 0;
@@ -133,16 +152,18 @@ int main(int argc, char** argv) {
         session.Diagnose();
         if (operation == "serve") {
             return ServeDevice(
-                    session, !read_only, enable, [] { return interrupted != 0; }, plan.driver,
-                    disable, effector_enable, effector_disable);
+                    session, !read_only, enable, [] { return interrupted != 0; },
+                    plan.driver.empty() ? "composed" : plan.driver, disable, effector_enable,
+                    effector_disable);
         }
         Print(session);
         if (operation == "inspect") return 0;
         if (interrupted) return 1;
         if (enable) session.EnableArm();
         const auto result = m::RunDeviceSteps(session, plan.steps, [] { return interrupted != 0; });
-        std::cout << "{\"status\":\"" << m::ResultName(result.status)
-                  << "\",\"physical_grip_verified\":false}\n";
+        std::cout << "{\"status\":\"" << m::ResultName(result.status);
+        std::cout << "\",\"detail\":" << JsonString(result.detail);
+        std::cout << ",\"physical_grip_verified\":false}\n";
         // 3: every step was delivered, but open-loop effector steps were not measured.
         if (result.status == m::Result::kUnverified) return 3;
         return result.status == m::Result::kSucceeded ? 0 : 1;
@@ -150,9 +171,8 @@ int main(int argc, char** argv) {
         // Startup can fail before ServeDevice sends its ready frame. Keep the cause available to
         // local clients instead of making them infer it from stderr or a subsequent EOF.
         if (argc > 1 && std::string(argv[1]) == "serve") {
-            std::cout << "{\"v\":1,\"id\":0,\"ok\":false,\"error\":" << JsonString(error.what())
-                      << "}\n"
-                      << std::flush;
+            std::cout << "{\"v\":1,\"id\":0,\"ok\":false,\"error\":";
+            std::cout << JsonString(error.what()) << "}\n" << std::flush;
         }
         std::cerr << error.what() << '\n';
         return 2;

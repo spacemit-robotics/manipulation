@@ -7,18 +7,25 @@
 | `mock_device` | 软件模拟 | 无需硬件 |
 | `agx_nero_revo2` | 松灵 Nero 七轴，可选 Revo2 右手 | 点位、连续路径、定时轨迹；Revo2 无位置反馈 |
 | `so101` | SO101 五轴，可选原配夹爪 | 点位、使能与失能；夹爪按负载判断是否夹住；附舵机校准工具 |
+| `mujoco_ur5e`、`mujoco_robotiq_2f85` | UR5e 机械臂与 Robotiq 2F-85 夹爪物理仿真 | 关节点位、末端位置反馈与保持；按需构建 |
 
 组件不自动使能、清错、归位或重试。设备独占、到位判定、取消、超时和故障锁定由设备会话统一处理。
 
 ## 系统架构
 
-![manipulation 系统架构](docs/assets/architecture.svg)
+![manipulation 分层架构：设备控制链、公共能力与 MuJoCo 只读图像输出](docs/assets/architecture-layered.svg)
 
-- **调用方**：C++ 应用链接组件库，在进程内使用 `DeviceSession`；命令行和 Python 应用使用 `DeviceClient`，它启动本机进程 `manipulation-device serve` 并经 JSONL 下发请求；YAML 点位任务由 `manipulation-device run` 执行。
-- **设备会话**：`core/` 的 `DeviceSession` 统一处理设备独占、到位判定、取消、超时和故障锁定，执行点位、连续路径、定时轨迹、目标跟随和末端执行器动作。
-- **驱动**：`runtime/` 解析 `device.yaml`，经注册表按 `device.driver` 创建驱动，驱动负责型号协议和单位转换。当前提供 Mock、Nero / Revo2、SO101 等驱动；新设备实现 `Arm` / `EndEffector` 并注册即可接入。
-- **设备**：Nero 驱动经独立 worker 进程调用厂商 SDK pyAgxArm，SO101 驱动经 `motor` 组件访问舵机总线。
-- **能力与工具**：运动学和手眼标定从 `device.yaml` 与 `descriptions/` 取得关节和模型，不写死型号；`so101-calibrate` 直接读写舵机寄存器，用于舵机校准。
+设备控制统一经过 `DeviceSession`，由角色驱动连接真机、Mock 或 MuJoCo。运动学与标定位于公共能力区，仿真图像来自物理世界的只读快照。
+
+| 模块 | 职责与调用关系 |
+| --- | --- |
+| 调用入口 | C++ 控制程序在进程内使用 `DeviceSession`；Python `DeviceClient` 和交互控制命令经本机 `manipulation-device serve`，以 JSONL 通信。 |
+| 配置与任务 | `runtime/` 解析设备配置并调度 YAML `steps`；`run`、`validate`、`inspect` 等命令直接调用 `manipulation-device`。 |
+| 设备会话 | `DeviceSession` 负责设备独占、动作执行、到位判定，以及取消、超时和故障锁定。 |
+| 角色装配 | 注册表装配 `Arm` 和可选 `EndEffector`，支持独立角色驱动、整机配置和显式共享连接。 |
+| 物理仿真 | MuJoCo 角色驱动在本地访问物理世界，或经 TCP 连接 `manipulation-simulation`；服务通过 `MujocoRuntime` 持有世界。 |
+| 图像输出 | `simulation/mujoco/` 提供 `World` 与 `WorldSnapshot`；`Viewer` 和 `Renderer` 读取快照，输出窗口与 RGB-D，不推进物理世界或取得控制权。 |
+| 公共能力 | 运动学与手眼求解通过独立接口调用；标定采集通过只读设备接口获取反馈。模型、限位和映射来自配置与 `descriptions/`。 |
 
 ## 1. 安装
 
@@ -33,6 +40,21 @@ mm --with-deps
 
 - 组件安装到 `output/staging`，缺少系统依赖时按提示安装；新终端须重新执行 `source build/envsetup.sh`。
 - 构建选项 `MANIPULATION_ENABLE_NERO`、`MANIPULATION_ENABLE_SO101` 默认开启；检测到 OpenCV 时同时构建标定求解器（`MANIPULATION_ENABLE_CALIBRATION`）。
+- C++ 正逆运动学按需启用：安装 Pinocchio 后执行 `mm -DMANIPULATION_ENABLE_KINEMATICS_PINOCCHIO=ON`。Python 运动学不需要 Pinocchio。
+
+安装后分别查看整机和独立角色驱动，不连接硬件：
+
+```bash
+manipulation drivers
+manipulation drivers --roles
+```
+
+| 命令 | 作用 |
+| --- | --- |
+| `manipulation drivers` | 整机驱动，如 `mock_device` |
+| `manipulation drivers --roles` | 分别列出机械臂与末端角色驱动，如 `mock` |
+
+列表只包含已启用构建的驱动。启用仿真构建选项后，角色列表包含机械臂 `mujoco_ur5e` 和末端 `mujoco_robotiq_2f85`。
 
 ## 2. 运行 Mock
 
@@ -41,6 +63,116 @@ manipulation demo
 ```
 
 执行两轴机械臂和六通道末端执行器的模拟点位任务，不连接硬件。
+
+### 配置组合
+
+`device.arm.driver` 与 `device.effector.driver` 分别选择机械臂和末端；各自的 `options` 保存连接参数。
+
+| 角色 | 硬件与 Mock | MuJoCo（按需构建） |
+| --- | --- | --- |
+| `device.arm.driver` | `mock`、`nero`、`so101` | `mujoco_ur5e`、`mujoco_mapped_arm` |
+| `device.effector.driver` | `mock`、`revo2`、`so101_gripper` | `mujoco_robotiq_2f85`、`mujoco_mapped_effector` |
+
+型号驱动用于随附的 UR5e 与 Robotiq 2F-85；`mujoco_mapped_arm` 与 `mujoco_mapped_effector` 通过映射文件接入自定义模型。
+
+不同连接分别填写 `resource_id`；共用连接时使用相同标识，且该驱动对须注册共享连接工厂。
+Nero / Revo2、SO101 / 原配夹爪和 MuJoCo 仿真角色已提供共享连接。
+
+软件组合不代表机械安装、电气连接或应用动作兼容。
+
+在组件目录运行独立组合示例，无需硬件：
+
+```bash
+manipulation drivers --roles
+manipulation validate --plan examples/composed_mock.yaml
+manipulation capabilities --plan examples/composed_mock.yaml
+manipulation run --plan examples/composed_mock.yaml
+```
+
+### 顺序任务
+
+`steps` 按注册的能力名称组合动作，开始执行前检查全部步骤。设备不支持的能力会被拒绝。
+
+| 能力 | 用途 |
+| --- | --- |
+| `joint_point` / `joint_jog` | 关节绝对点位 / 单关节相对运动 |
+| `joint_path` / `joint_trajectory` | 连续关节路径 / 定时轨迹 |
+| `effector_position` | 末端各通道位置 |
+| `arm_hold` / `effector_hold` | 保持并确认停止 |
+
+```bash
+manipulation run --plan examples/capability_sequence.yaml
+```
+
+该示例使用 Mock。真机的可用能力以 `manipulation capabilities` 的 `registered` 列表为准；配置不能补充驱动缺少的能力。
+
+### UR5e / MuJoCo 物理仿真
+
+机械臂物理仿真与渲染随 [manipulation 仓库](https://github.com/spacemit-robotics/manipulation) 提供，位于 SDK 的 `components/control/manipulation/simulation/mujoco/`。
+
+底层物理世界、模拟相机和窗口接口见[仿真模块说明](simulation/mujoco/README.md)。
+
+在 SDK 根目录执行，不需要机械臂或显示器：
+
+```bash
+source build/envsetup.sh
+cd components/control/manipulation
+python3 tools/prepare_simulation_assets.py
+mm -DMANIPULATION_ENABLE_MUJOCO=ON
+manipulation run --plan examples/simulation/ur5e_robotiq.yaml
+```
+
+示例执行六轴机械臂点位和 Robotiq 2F85 夹爪开合；仅机械臂使用 `examples/simulation/ur5e_arm.yaml`。
+
+模型网格按固定版本下载并校验，MuJoCo 库由构建系统获取。`MANIPULATION_ENABLE_MUJOCO` 默认关闭。
+
+- 机械臂选择 `mujoco_ur5e`，夹爪选择 `mujoco_robotiq_2f85`；相同 `resource_id` 和 `mapping_file` 共用一个物理世界。
+- 每次设备会话创建独立仿真，从模型初始状态开始；连续交互使用同一个 `DeviceClient`，不同命令行进程不保留上次仿真状态。
+- 反馈取自物理引擎中的关节位置和速度，不使用目标值代替。夹爪到位不表示已抓稳物体。
+- 不支持连续路径和定时轨迹。
+
+需要窗口、模拟相机或跨机控制时，安装图形依赖并构建仿真服务：
+
+```bash
+sudo apt install -y git ca-certificates libglfw3-dev libgl1-mesa-dev libx11-dev
+mm -DMANIPULATION_ENABLE_MUJOCO=ON -DMANIPULATION_ENABLE_SIMULATION_RENDERER=ON
+manipulation-simulation --plan examples/simulation/ur5e_robotiq.yaml --viewer
+```
+
+服务保持一个物理世界，窗口与相机只读取它，不执行配置中的 `steps`。启用 `--viewer` 时，首帧绘制成功后输出 `ready` 并接受连接。
+
+在第二个已加载 SDK 环境的终端、同一组件目录执行：
+
+```bash
+manipulation run --plan examples/simulation/ur5e_robotiq_remote.yaml
+manipulation-simulation-camera --camera overview --output camera_frame
+```
+
+`camera_frame/` 保存彩色图 `rgb.ppm`、米制深度 `depth.f32` 和相机参数 `metadata.json`；已有目录不覆盖。
+
+窗口和模拟相机需要可用的 X11 显示服务；可在图形桌面终端运行，也可通过 `ssh -X` 将窗口转发到运行 X server 的电脑。省略 `--viewer` 可只提供控制服务。
+
+服务仅监听 `127.0.0.1:9100`。K3 连接 PC 时，在 K3 保持 SSH 转发运行，再使用同一远程配置：
+
+```bash
+read -rp "PC SSH 地址（用户@主机）: " SIM_PC
+ssh -N -L 9100:127.0.0.1:9100 "$SIM_PC"
+```
+
+仅构建远程客户端时执行以下命令，不需要本机 MuJoCo 或图形库：
+
+```bash
+mm -DMANIPULATION_ENABLE_MUJOCO_REMOTE=ON \
+  -DMANIPULATION_ENABLE_MUJOCO=OFF -DMANIPULATION_ENABLE_SIMULATION_RENDERER=OFF
+```
+
+远端世界只接受一个控制连接；连接断开或租约到期时请求保持，重新连接不恢复旧动作。
+
+远程示例的反馈时限为 `1.0` 秒，包含网络往返耗时；服务端本地采样时限独立生效。
+
+完整视觉抓取示例位于 `application/ros2/linksee/perceptive_grasp`，使用 UR5e、Robotiq 2F85、模拟 RGB-D 和桌面物体场景。
+
+其他模型通过 MJCF 场景和通用映射驱动接入，步骤见[仿真模型接入](docs/development.md#仿真模型接入)，映射字段见[接口参考](docs/reference.md#仿真映射)。
 
 ## 3. 现场目录与当前设备
 
@@ -55,34 +187,46 @@ SITE/
 └── device.yaml -> nero/device.yaml    # 当前设备
 ```
 
-`configure` 生成配置后，把该设备设为当前设备；其他命令默认控制当前设备，无需重复指定。
+`configure MODEL` 创建或复用 `SITE/MODEL/device.yaml`，成功后把该设备设为当前设备。
+
+| 配置状态 | `configure` 的行为 |
+| --- | --- |
+| 文件不存在 | 按模板生成配置，离线校验后选中 |
+| 已有有效配置，型号匹配 | 保留文件内容，直接选中 |
+| 配置无效或型号不匹配 | 报错，保持原来的当前设备 |
+
+`--variant`、`--set` 和 `--python` 只用于生成新文件。修改已有配置时，编辑该文件，或备份并移走后重新生成。
+
+`inspect`、`monitor` 和单次运动命令默认控制当前设备，无需重复指定。
 
 ```bash
 manipulation use          # 列出已配置的设备，* 标记当前设备
 manipulation use so101    # 切换当前设备
 ```
 
-单条命令可用 `--plan FILE` 改用其他配置。
+单条命令可用 `--plan FILE` 改用其他配置；顺序任务 `manipulation run` 必须显式提供 `--plan FILE`。
 
 ## 4. 连接 Nero
 
 Nero 经支持 SocketCAN 的 USB-CAN 适配器以 1 Mbps 连接主机；Revo2 右手接在机械臂末端口，与机械臂共用连接。
+
 退出厂商 Web、遥操作等其他控制程序后执行：
 
 ```bash
 sudo ip link set can0 up type can bitrate 1000000
-manipulation configure nero --variant revo2_right   # 仅机械臂时去掉 --variant
+# 仅机械臂时去掉 --variant revo2_right
+manipulation configure nero --variant revo2_right && manipulation validate
 manipulation inspect
 manipulation teach pose_01.json
 manipulation hand-move 1 1 0.7 1 1 1
 ```
 
-- **配置**：保存到 `SITE/nero/device.yaml`，已有文件不覆盖。CAN 接口不是 `can0` 时，追加 `--set channel=<接口名>`。
+- **配置**：保存到 `SITE/nero/device.yaml`，已有有效配置会被复用并选中。首次生成时，CAN 接口不是 `can0` 可追加 `--set channel=<接口名>`；已有配置直接修改文件中的接口名。
 - **只读命令**：`inspect` 读取状态，`teach` 记录静止姿态，均不运动。
 - **灵巧手**：`hand-move` 按 `thumb_tip`、`thumb_base`、`index_finger`、`middle_finger`、`ring_finger`、`pinky_finger` 的顺序给出位置，默认执行 2 s。
   - 位置 `0` 为闭合、`1` 为张开，所有末端执行器相同；
-  - Revo2 没有位置反馈，结果为 `unverified`，表示指令已下发并等待执行时间结束，但未测量是否到位；
-  - 起始位置未知，即使目标变化很小，手指也可能大幅动作。
+  - Revo2 默认配置不读取位置反馈，按 `--duration` 等待后返回 `unverified`，表示指令已下发，但未测量是否到位；此模式不支持 `hand-step`，Revo2 不支持 `hand-grasp`；
+  - 起始位置未知，即使目标变化很小，手指也可能大幅动作；单次执行时长不超过 2.55 s。
 
 机械臂须按厂商规程使能并处于位置模式。现场须有人看护，急停按钮伸手可及。
 Nero 失能或断电后会坍塌，不能用失能或断电代替软件停止。
@@ -94,6 +238,7 @@ Nero 失能或断电后会坍塌，不能用失能或断电代替软件停止。
 ### 校准舵机
 
 SO101 使用通用舵机，首次使用前须校准。已有这台机械臂的 `so101_calibration.json`、`so101_gripper_calibration.json` 时，放入 `SITE/so101/` 即可跳过本节。
+
 新装或重新装配后，先支撑机械臂、取下夹爪中的物品并释放扭矩，再执行：
 
 ```bash
@@ -133,15 +278,41 @@ manipulation pose-move 0.20 0.00 0.15 --speed 0.2   # 末端移到基座坐标 (
 manipulation line-move 0.20 0.05 0.15 --speed 0.2   # 末端沿直线移动
 ```
 
+SO101 的单次动作按以下方式执行：
+
+| 命令 | 目标与完成条件 |
+| --- | --- |
+| `joint-step JOINT DELTA` | 相对当前反馈移动选中关节，单位 rad；只更新该舵机目标，其余保持；选中关节到位且全臂静止后完成 |
+| `joint-move Q1 Q2 Q3 Q4 Q5` | 按配置顺序给出五个绝对角度，单位 rad；全部关节到位且全臂静止后完成 |
+| `hand-move V` | 夹爪绝对位置，`0` 闭合、`1` 张开；`--duration` 默认 2 s |
+| `hand-step gripper DELTA` | 根据位置反馈计算 `±0.01` 的目标，执行时长 1 s |
+| `hand-grasp` | 默认闭合到 `0`，`--duration` 默认 1 s；报告到位或有效夹持 |
+
+到位或夹持须由连续三个新鲜反馈样本确认，满足条件即返回。静止但超出目标容差仍属未到位。
+Nero 等未提供原生单关节点位的驱动，`joint-step` 从当前反馈生成整组目标并按整组判定到位。
+多通道末端的 `hand-step` 也发送整组目标，其余通道取当前反馈；它要求位置反馈。
+
 - **监控与示教**：`monitor` 只读；释放扭矩时可手动拖动机械臂观察读数，再用 `teach` 记录姿态。中位姿态下各关节应接近 0°。
 - **抓握判断**：
-  - 夹爪闭合途中受阻停止，且负载不低于 `grip_load_threshold`（默认为额定输出的 10%）：结果为 `effector_grasp_holding`；
-  - 夹爪完全闭合：未夹住物体；
+  - 夹爪向闭合方向运动，停在目标外且负载绝对值不低于 `grip_load_threshold`（默认为额定输出的 10%）：结果为 `effector_grasp_holding`；
+  - 到达闭合目标：结果为 `effector_position_reached`，`physical_grip_verified` 为 `false`；
+  - 张开或目标不变时的超调、负载不能作为夹持证据；
   - 负载判断不是力觉测量，首次抓取新物体时须在旁观察。
 - **夹爪使能与保持**：夹爪须先由 `so101-calibrate configure` 设置扭矩保护，否则拒绝使能。夹住物体后执行 `hand-hold` 不会松开。
-- **速度与超时**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`pose-move` 估算的时长超过 `timeout_s` 时，在运动前拒绝。
+- **执行中失能**：末端反馈明确失去扭矩时，中断动作并尝试保持；无法确认停止时返回 `stop_unknown` 并锁定会话。
+- **速度预检**：`--speed 1` 对应 `max_velocity_rad_s`（默认 1 rad/s）。`joint-move` 和 `pose-move` 按控制器速度上限与到位容差估算最短时长，超过 `arm.timeout_s` 时在下发前拒绝。
 - **逆运动学**：五轴机械臂默认只求解位置，加 `--rpy R P Y` 时同时求解姿态。不收敛时不运动；只检查关节限位，不检查碰撞。
 - **直线运动**：`line-move` 按 5 mm 间隔逐点求解，任一路点不可达时拒绝整条路径。SO101 不支持连续路径和定时轨迹。
+
+单次动作的命令行请求期限为：
+
+| 命令 | 请求期限（s） |
+| --- | --- |
+| `joint-step`、`joint-move`、`pose-move`、`line-move` 逐点执行 | `max(10, arm.timeout_s + 5)`；`arm.timeout_s` 须不超过 175 s |
+| `hand-move`、`hand-step`、`hand-grasp` | `max(10, effector.timeout_s + 5)` |
+
+设备仍按配置的动作期限执行；额外时间用于读取结果和确认停止，动作完成即可返回。
+真正超时仍报告失败并执行停止确认，不自动重放。Python `DeviceClient` 的 `timeout` 由调用者设置，默认 10 s，详见[接口参考](docs/reference.md)。
 
 ## 6. 手眼标定
 
@@ -150,13 +321,6 @@ manipulation line-move 0.20 0.05 0.15 --speed 0.2   # 末端沿直线移动
 - 需要 OpenCV：执行 `sudo apt install libopencv-dev python3-opencv` 后重新执行 `mm`；
 - 需要与 Python 版本匹配的 `pyrealsense2`。
 
-```bash
-hand-eye collect cal_01 --option board=board.json   # 摆好姿态并静止后输入 CAPTURE 采样
-hand-eye solve cal_01                               # 求解；残差阈值默认 5 mm / 2°
-hand-eye promote cal_01                             # 确认通过阈值的结果
-hand-eye export cal_01                              # 导出 extrinsic.json
-```
-
 `board.json` 按实物填写标定板参数，例如：
 
 ```json
@@ -164,7 +328,38 @@ hand-eye export cal_01                              # 导出 extrinsic.json
  "square_length_m": 0.025, "marker_length_m": 0.018}
 ```
 
-采集工具不移动机械臂；结果保存在现场目录，不覆盖已有文件。
+完成设备配置并准备 `board.json` 后执行：
+
+```bash
+hand-eye configure collection.json --installation-id workcell-01 --board board.json
+hand-eye collect cal_01 --config collection.json
+hand-eye solve cal_01
+hand-eye promote cal_01
+hand-eye export cal_01
+```
+
+- `configure` 引用当前设备及其关节模型；多台相机时追加 `--serial <序列号>`。配置中的路径相对 `collection.json` 解析。
+- 采集工具不移动机械臂。按设备规程摆好姿态并静止后输入 `CAPTURE`；默认采集 12 组。
+- 求解使用全部样本和留出样本评估，残差阈值默认 5 mm / 2°。未通过时不能发布结果。
+- 数据与结果保存在 `SITE/cal_01/`；`export` 生成 `extrinsic.json`，不覆盖已有文件。
+
+采集、求解与评估不依赖应用。相同流程可用于 Dice Arena 和 `perceptive_grasp`；后者的外参配置片段由以下命令生成：
+
+```bash
+hand-eye export-perceptive cal_01 --installation-id workcell-01 \
+  --camera-type realsense --output perceptive_calibration.yaml
+```
+
+把生成的 `calibration.realsense.T_base_camera` 合入抓取配置；平移单位为 m，旋转为 XYZ RPY rad。
+导出只新建外参片段，不自动修改应用配置或切换控制后端，也不覆盖已有文件。
+
+导出条件：
+
+- `--installation-id` 与采集时显式确认的标识相同。
+- 相机类型匹配，坐标系为 `color_optical`。
+- 结果通过质量检查，并已执行 `promote`。
+
+`workcell-01` 标识固定的机械臂、相机安装。更换基座、相机位置或安装后须重新标定，不能改写标识复用旧结果。
 
 ## 7. 在程序中使用
 
@@ -177,6 +372,7 @@ with DeviceClient("manipulation-device", "examples/mock_device.yaml") as arm:
     print(arm.state())
     arm.move_arm([0.2, -0.2], speed_scale=0.05)
     arm.move_effector([0.5] * 6, duration_s=0.5)
+    arm.execute_capability("joint_jog", {"joint_index": 0, "delta_rad": 0.1})
 ```
 
 - **失败处理**：运动失败时抛出 `DeviceCommandError`，`result` 字段包含结果状态；`rejected` 表示请求未写入设备，`latched` 表示会话已锁定。
@@ -211,16 +407,16 @@ namespace m = spacemit::manipulation;
 
 auto registry = m::MakeBuiltinDeviceRegistry();
 auto plan = m::LoadDevicePlan("examples/mock_device.yaml", registry);
-m::DeviceSession session(plan.definition, registry.Create(plan.driver, plan.definition, plan.options));
+m::DeviceSession session(plan.definition, m::CreatePlanDevices(plan, registry));
 session.Connect();                                    // 获取设备独占，不使能、不运动
 auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失败或取消
 ```
 
-**YAML 点位任务**：在设备配置的 `steps` 中按顺序写入动作，用 `manipulation-device run` 执行，示例见 [examples/point_sequence](examples/point_sequence/README.md)。
+**YAML 顺序任务**：在设备配置的 `steps` 中按顺序写入动作，用 `manipulation run --plan FILE` 执行。复杂判断、重试与恢复保留在应用中。
 
 ## 8. 新增驱动
 
-1. 实现 `Arm`；有末端执行器时实现 `EndEffector`。参考 `examples/bench_driver/bench_driver.cpp`。
+1. 实现 `Arm` 或 `EndEffector`，用 `RegisterArm` 或 `RegisterEffector` 注册；共用连接的组合另用 `RegisterShared` 注册。参考 `examples/bench_driver/bench_driver.cpp`。
 2. 在模块的 `CMakeLists.txt` 中登记：
    ```cmake
    target_sources(manipulation_drivers PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/my_driver.cpp)
@@ -230,6 +426,12 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 4. 在 `descriptions/robots/<型号>/devices/` 放置配置模板，供 `manipulation configure` 使用。
 
 无需修改公共头文件或已有驱动。驱动约定见[开发指南](docs/development.md)。
+
+新增顺序能力时，在模块中注册参数解析、支持条件、参数校验和执行函数，无需修改任务解析器或执行分支。
+
+- **构建注册**：使用 `manipulation_register_capability` 纳入构建。
+- **树外模块**：通过 `MANIPULATION_EXTRA_CAPABILITY_DIRS` 指定，多个目录用分号分隔。
+- **示例**：`examples/capability_probe/`，构建步骤见[开发指南](docs/development.md#注册顺序能力)。
 
 ## 9. 使用限制
 
@@ -243,15 +445,38 @@ auto result = session.MoveArm({{0.2, -0.2}, 0.05});   // 阻塞至到位、失�
 ## 目录结构
 
 ```text
-include/manipulation/   C++ 公共接口
-core/                   设备会话：独占、执行、到位判定、故障锁定
-runtime/                配置解析与点位任务
-drivers/                各型号驱动与 Mock
-capabilities/           运动、诊断、运动学、标定及其命令行
-bindings/python/        Python 接口
-descriptions/           机型描述：URDF、model.json、配置模板
-examples/               Mock 配置、C++ 接入、扩展驱动
-tools/  tests/  docs/   辅助脚本、测试、参考文档
+manipulation/
+├── include/manipulation/   # C++ 公共接口
+├── core/                   # 设备会话：独占、执行、到位判定、故障处理
+├── runtime/                # 配置解析、设备装配与 YAML 顺序任务
+├── drivers/                # 设备驱动
+│   ├── arms/               # 机械臂驱动
+│   │   ├── nero/           # Nero 七轴机械臂
+│   │   └── so101/          # SO101 五轴机械臂
+│   ├── effectors/          # 末端执行器驱动
+│   │   ├── revo2/          # Revo2 灵巧手
+│   │   └── so101_gripper/  # SO101 原配夹爪
+│   ├── common/             # 共享连接
+│   │   ├── agx_session/    # Nero 与 Revo2 共享会话
+│   │   └── so101_session/  # SO101 机械臂与夹爪共享串口总线
+│   ├── simulation/         # 仿真设备驱动
+│   │   └── mujoco/         # 共享物理世界与关节、末端映射
+│   └── mock/               # 无硬件模拟设备
+├── capabilities/           # 公共能力与命令行工具
+│   ├── motion/             # 运动控制与 manipulation-device
+│   ├── diagnostics/        # 设备检查与 manipulation 操作命令
+│   ├── kinematics/         # 正逆运动学
+│   ├── calibration/        # 姿态采集与手眼标定
+│   └── simulation/         # 仿真服务、可视化与远程相机工具
+├── simulation/mujoco/      # 物理世界、快照、RGB-D 相机与窗口
+├── bindings/python/        # Python 客户端 DeviceClient
+├── descriptions/           # 模型与配置
+│   ├── robots/             # 机型描述：URDF、model.json、配置模板
+│   └── simulation/         # 仿真场景、关节与执行器映射
+├── examples/               # Mock 配置、C++ 接入、驱动与能力扩展
+├── tools/                  # 辅助脚本
+├── tests/                  # 测试
+└── docs/                   # 接口参考与开发指南
 ```
 
 ## 参考文档

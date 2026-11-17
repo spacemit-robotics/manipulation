@@ -24,6 +24,7 @@ public:
         capabilities.enable = true;
         capabilities.disable = true;
         capabilities.verified_hold = true;
+        capabilities.single_joint_point = true;
         capabilities.minimum_speed_scale = kSpeedTickRadS / session_->Config().maximum_velocity;
         return capabilities;
     }
@@ -57,9 +58,8 @@ public:
             if (settings.arm_calibrated) {
                 const auto& calibration = settings.calibration[i];
                 if (sample.offset != calibration.offset || sample.minimum > calibration.minimum ||
-                    sample.maximum < calibration.maximum) {
-                    throw std::runtime_error(
-                            "SO101 motor " + std::to_string(settings.ids[i]) +
+                        sample.maximum < calibration.maximum) {
+                    throw std::runtime_error("SO101 motor " + std::to_string(settings.ids[i]) +
                             " calibration differs from the installed servo configuration");
                 }
             }
@@ -82,8 +82,9 @@ public:
         state.source_time_s =
                 std::chrono::duration<double>(state.received_at.time_since_epoch()).count();
         state.valid = true;
+        state.joint_reference_verified = settings.arm_calibrated;
         if (std::chrono::duration<double>(Clock::now() - state.received_at).count() >
-            definition_.maximum_age_s) {
+                definition_.maximum_age_s) {
             throw std::runtime_error("SO101 complete arm feedback exceeded maximum_age_s");
         }
         return state;
@@ -102,8 +103,8 @@ public:
         }
         if (!outside.empty()) {
             throw CommandRejected("SO101 joints outside their limits: " + outside +
-                                  ". With torque released, move them inside by hand, or capture "
-                                  "the travel again");
+                    ". With torque released, move them inside by hand, or capture "
+                    "the travel again");
         }
         if (state.enabled) return;
         // Set current positions before torque, preventing a retained old target from restarting.
@@ -135,7 +136,7 @@ public:
     void Submit(const JointPoint& point) override {
         RequireCalibration();
         if (point.target_rad.size() != kArmJoints || !std::isfinite(point.speed_scale) ||
-            point.speed_scale <= 0 || point.speed_scale > 1 || point.resend_interval_s != 0) {
+                point.speed_scale <= 0 || point.speed_scale > 1 || point.resend_interval_s != 0) {
             throw CommandRejected(
                     "SO101 requires five joints, speed_scale in (0,1], no resend interval");
         }
@@ -158,6 +159,30 @@ public:
         if (!state.enabled)
             throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
         session_->Target(Ids(), ticks, Velocities(point.speed_scale));
+    }
+
+    void SubmitJoint(std::size_t joint_index, double target_rad, double speed_scale) override {
+        RequireCalibration();
+        if (joint_index >= kArmJoints || !std::isfinite(speed_scale) || speed_scale <= 0 ||
+                speed_scale > 1) {
+            throw CommandRejected("SO101 requires a valid joint index and speed_scale in (0,1]");
+        }
+        if (speed_scale < GetCapabilities().minimum_speed_scale) {
+            throw CommandRejected("SO101 speed is below one encoder tick per second");
+        }
+        const int target = JointTicks(target_rad);
+        const auto outside = OutsideLimits(joint_index, target_rad, target);
+        if (!outside.empty()) throw CommandRejected("SO101 target outside limits: " + outside);
+        const auto state = Read();
+        if (!state.position_mode || state.fault) {
+            throw CommandRejected("SO101 requires fault-free position-mode feedback");
+        }
+        if (!state.enabled)
+            throw CommandRejected("SO101 arm torque is disabled; explicitly enable first");
+        const auto& settings = session_->Config();
+        // Other joints retain their controller goals, including the static error holding a load.
+        session_->Target({settings.ids[joint_index]}, {target},
+                {settings.maximum_velocity * speed_scale});
     }
 
     bool Hold() override {
@@ -202,8 +227,8 @@ private:
         const auto& limit = definition_.joints[index];
         const auto& calibration = session_->Config().calibration[index];
         if (std::isfinite(radians) && radians >= limit.minimum_rad &&
-            radians <= limit.maximum_rad && ticks >= calibration.minimum &&
-            ticks <= calibration.maximum) {
+                radians <= limit.maximum_rad && ticks >= calibration.minimum &&
+                ticks <= calibration.maximum) {
             return "";
         }
         constexpr double kDegree = 180 / 3.14159265358979323846;
@@ -212,8 +237,8 @@ private:
         std::ostringstream text;
         text.setf(std::ios::fixed);
         text.precision(1);
-        text << limit.name << " at " << radians * kDegree << " deg, allowed " << low * kDegree
-             << ".." << high * kDegree << " deg";
+        text << limit.name << " at " << radians * kDegree << " deg, allowed " << low * kDegree;
+        text << ".." << high * kDegree << " deg";
         return text.str();
     }
 
@@ -238,8 +263,8 @@ private:
 };
 }  // namespace
 
-std::unique_ptr<Arm> MakeArm(const DeviceConfig& definition,
-                             std::shared_ptr<SharedSession> session) {
+std::unique_ptr<Arm> MakeArm(
+        const DeviceConfig& definition, std::shared_ptr<SharedSession> session) {
     return std::make_unique<So101Arm>(definition, std::move(session));
 }
 }  // namespace spacemit::manipulation::so101

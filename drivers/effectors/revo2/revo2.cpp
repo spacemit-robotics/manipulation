@@ -20,8 +20,8 @@ public:
         connection_->Acquire();
         try {
             // Without position/status frames the finger-current frame is the liveness evidence.
-            connection_->Call("effector_connect", std::string(",\"feedback\":\"") +
-                                                          (feedback_ ? "position" : "none") + "\"");
+            connection_->Call("effector_connect",
+                    std::string(",\"feedback\":\"") + (feedback_ ? "position" : "none") + "\"");
             connected_ = true;
         } catch (...) {
             connection_->Release();
@@ -52,8 +52,8 @@ public:
 
     void Submit(const EffectorPoint& point) override {
         std::ostringstream fields;
-        fields << std::setprecision(17) << ",\"duration_s\":" << point.duration_s
-               << ",\"positions\":[";
+        fields << std::setprecision(17) << ",\"duration_s\":" << point.duration_s;
+        fields << ",\"positions\":[";
         for (std::size_t i = 0; i < point.positions.size(); ++i) {
             if (i) fields << ',';
             fields << 1 - point.positions[i];
@@ -69,9 +69,9 @@ private:
 };
 }  // namespace
 
-std::unique_ptr<EndEffector> MakeEffector(const EffectorConfig& config,
-                                          std::shared_ptr<SharedSession> connection) {
-    return std::make_unique<Revo2>(config.feedback == EffectorFeedback::kPosition,
-                                   std::move(connection));
+std::unique_ptr<EndEffector> MakeEffector(
+        const EffectorConfig& config, std::shared_ptr<SharedSession> connection) {
+    return std::make_unique<Revo2>(
+            config.feedback == EffectorFeedback::kPosition, std::move(connection));
 }
 }  // namespace spacemit::manipulation::agx

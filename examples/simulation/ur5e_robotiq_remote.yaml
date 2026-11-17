@@ -1,0 +1,47 @@
+# Copyright (C) 2026 SpacemiT (Hangzhou) Technology Co. Ltd.
+# SPDX-License-Identifier: Apache-2.0
+# Connect to manipulation-simulation, directly or through an SSH local forward.
+schema_version: 3
+device:
+    arm:
+        driver: mujoco_ur5e
+        device_id: arm_main
+        resource_id: simulation_ur5e_robotiq_remote
+        options:
+            mapping_file: ../../descriptions/simulation/ur5e_robotiq/mapping.yaml
+            transport: tcp
+            host: 127.0.0.1
+            port: '9100'
+        tolerance_rad: 0.012
+        timeout_s: 15.0
+        maximum_age_s: 1.0
+        joints:
+            - {name: shoulder_pan_joint, minimum_rad: -6.2831, maximum_rad: 6.2831}
+            - {name: shoulder_lift_joint, minimum_rad: -6.2831, maximum_rad: 6.2831}
+            - {name: elbow_joint, minimum_rad: -3.1415, maximum_rad: 3.1415}
+            - {name: wrist_1_joint, minimum_rad: -6.2831, maximum_rad: 6.2831}
+            - {name: wrist_2_joint, minimum_rad: -6.2831, maximum_rad: 6.2831}
+            - {name: wrist_3_joint, minimum_rad: -6.2831, maximum_rad: 6.2831}
+    effector:
+        driver: mujoco_robotiq_2f85
+        device_id: gripper_main
+        resource_id: simulation_ur5e_robotiq_remote
+        options:
+            mapping_file: ../../descriptions/simulation/ur5e_robotiq/mapping.yaml
+            transport: tcp
+            host: 127.0.0.1
+            port: '9100'
+        channels: [gripper]
+        feedback: position
+        tolerance: 0.03
+        timeout_s: 10.0
+        maximum_age_s: 1.0
+steps:
+    - capability: joint_point
+      target_rad: [-1.45, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]
+      speed_scale: 0.2
+    - {capability: effector_position, positions: [0.25], duration_s: 0.5}
+    - {capability: effector_position, positions: [1.0], duration_s: 0.5}
+    - capability: joint_point
+      target_rad: [-1.5708, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]
+      speed_scale: 0.2

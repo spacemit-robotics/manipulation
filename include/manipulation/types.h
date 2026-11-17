@@ -6,6 +6,8 @@
  *
  * Units are radians and seconds unless a name says otherwise.
  */
+// Keep distinct from the motor component's TYPES_H guard.
+// NOLINTNEXTLINE(build/header_guard)
 #ifndef MANIPULATION_TYPES_H_
 #define MANIPULATION_TYPES_H_
 
@@ -93,6 +95,18 @@ struct CommandResult {
 class CommandRejected : public std::runtime_error {
 public:
     using std::runtime_error::runtime_error;
+};
+
+/**
+ * @brief A busy-state check refused a command before any device write.
+ *
+ * Callers may recheck device health, wait for fresh idle feedback and retry within a bounded
+ * deadline. Remaining preconditions may still fail. Faults, disabled state, stale feedback and
+ * failures after submission are not classified as busy.
+ */
+class BusyRejected : public CommandRejected {
+public:
+    using CommandRejected::CommandRejected;
 };
 
 /**

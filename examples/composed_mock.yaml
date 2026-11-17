@@ -1,0 +1,20 @@
+# Independent role selection; the two mock resources require no hardware.
+schema_version: 3
+device:
+  model: mock
+  arm:
+    driver: mock
+    device_id: arm_main
+    resource_id: composed_mock_arm
+    joints:
+      - {name: joint1, minimum_rad: -1, maximum_rad: 1}
+      - {name: joint2, minimum_rad: -1, maximum_rad: 1}
+  effector:
+    driver: mock
+    device_id: tool_main
+    resource_id: composed_mock_tool
+    channels: [gripper]
+    feedback: position
+steps:
+  - {capability: joint_point, target_rad: [0.1, 0.2], speed_scale: 0.05}
+  - {capability: effector_position, positions: [0.5], duration_s: 0.1}

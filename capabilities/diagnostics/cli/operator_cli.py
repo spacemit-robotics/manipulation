@@ -3,6 +3,7 @@
 """Device operator commands. Model-independent; no implicit enable, home or recovery."""
 
 import math
+from pathlib import Path
 
 from .operator_support import Context, argument_parser, load_tool, run
 
@@ -37,7 +38,12 @@ def hand_step(context, args):
         if not 0 <= target[index] <= 1:
             raise ValueError("target outside normalized range")
         print(f"target ({channels[index]}):", target, flush=True)
-        print(client.move_effector(target, duration_s=1.0), flush=True)
+        print(
+            client.move_effector(
+                target, duration_s=1.0, timeout=effector_timeout(described["effector_timeout_s"])
+            ),
+            flush=True,
+        )
         print(client.state())
 
 
@@ -70,7 +76,10 @@ def hand_move(context, args):
             flush=True,
         )
         print(
-            client.move_effector(args.positions, duration_s=args.duration, allow_unverified=True),
+            client.move_effector(
+                args.positions, duration_s=args.duration, allow_unverified=True,
+                timeout=effector_timeout(described["effector_timeout_s"]),
+            ),
             flush=True,
         )
 
@@ -81,7 +90,8 @@ def hand_grasp(context, args):
     from .client import DeviceClient
 
     plan = context.plan(args.plan)
-    channels = context.describe(plan)["channels"]
+    described = context.describe(plan)
+    channels = described["channels"]
     if not channels:
         raise ValueError(f"{plan} has no end effector")
     target = args.positions if args.positions is not None else [0.0] * len(channels)
@@ -95,7 +105,10 @@ def hand_grasp(context, args):
             raise ValueError(
                 "this end effector reports no grasp evidence; use `manipulation hand-move`"
             )
-        result = client.move_effector(target, duration_s=args.duration)
+        result = client.move_effector(
+            target, duration_s=args.duration,
+            timeout=effector_timeout(described["effector_timeout_s"]),
+        )
         state = client.state()
         print(
             json.dumps(
@@ -163,15 +176,17 @@ def load_model(context, plan):
     )
 
 
-def check_duration(state, target, speed, timeout_s):
+def check_duration(state, target, speed, timeout_s, tolerance_rad=0.0):
     """Refuse a point move that cannot finish within the arm timeout even at the full commanded
     speed."""
+    if not math.isfinite(speed) or not 0 < speed <= 1:
+        raise ValueError("--speed must be finite and in (0,1]; nothing moved")
     limits = state.get("controller_limits") or []
     if len(limits) != len(target):
         return
     needed = max(
         (
-            abs(goal - joint) / (speed * limit["max_velocity_rad_s"])
+            max(0.0, abs(goal - joint) - tolerance_rad) / (speed * limit["max_velocity_rad_s"])
             for joint, goal, limit in zip(state["joints_rad"], target, limits)
             if limit["max_velocity_rad_s"] > 0
         ),
@@ -182,6 +197,22 @@ def check_duration(state, target, speed, timeout_s):
             f"the move needs at least {needed:.0f} s at --speed {speed:g}, more than the arm "
             f"timeout_s {timeout_s:g}; raise --speed or move in shorter steps; nothing moved"
         )
+
+
+def point_timeout(arm_timeout_s):
+    """Leave time for feedback reads and stop confirmation after the device motion deadline."""
+    timeout = max(10.0, arm_timeout_s + 5.0)
+    if timeout > 180:
+        raise ValueError(
+            "point commands require arm timeout_s <= 175 s to reserve feedback and stop "
+            "confirmation time within the 180 s request limit; nothing moved"
+        )
+    return timeout
+
+
+def effector_timeout(effector_timeout_s):
+    """Reserve feedback and stop confirmation time beyond the validated device deadline."""
+    return max(10.0, effector_timeout_s + 5.0)
 
 
 def path_timeout(start, waypoints, velocity, acceleration, arm_timeout_s):
@@ -223,6 +254,7 @@ def kinematics(context, args):
     )
     described = context.describe(plan)
     limits = described["joint_limits_rad"]
+    timeout = point_timeout(described["arm_timeout_s"]) if args.operation == "pose-move" else None
     if args.operation == "ik" and args.seed_pose:  # Offline: the seed comes from a saved pose.
         seed = json.loads(context.device_file(plan, args.seed_pose).read_text(encoding="utf-8"))[
             "state"
@@ -267,9 +299,10 @@ def kinematics(context, args):
                     previous = chunk[-1]
                 print(result)
             else:  # Point moves only: hand over within tolerance, stop at the last waypoint.
+                timeout = point_timeout(described["arm_timeout_s"])
                 for waypoint in waypoints[:-1]:
-                    client.move_arm(waypoint, args.speed, wait_for_arrival=False)
-                print(client.move_arm(waypoints[-1], args.speed))
+                    client.move_arm(waypoint, args.speed, wait_for_arrival=False, timeout=timeout)
+                print(client.move_arm(waypoints[-1], args.speed, timeout=timeout))
             return
         result = solve(model, target, current, orientation_weight=weight, limits=limits)
         print(json.dumps(result), flush=True)
@@ -278,8 +311,11 @@ def kinematics(context, args):
                 "no joint solution within tolerance from the current pose; nothing moved"
             )
         if args.operation == "pose-move":
-            check_duration(state, result["joints_rad"], args.speed, described["arm_timeout_s"])
-            print(client.move_arm(result["joints_rad"], args.speed))
+            check_duration(
+                state, result["joints_rad"], args.speed, described["arm_timeout_s"],
+                described["arm_tolerance_rad"],
+            )
+            print(client.move_arm(result["joints_rad"], args.speed, timeout=timeout))
 
 
 def device_action(context, args):
@@ -307,7 +343,8 @@ def joint_move(context, args):
     from .client import DeviceClient
 
     plan = context.plan(args.plan)
-    joints = context.describe(plan)["joints"]
+    described = context.describe(plan)
+    joints = described["joints"]
     if args.operation == "joint-step":
         index = (
             joints.index(args.joint)
@@ -320,11 +357,16 @@ def joint_move(context, args):
         raise ValueError(
             f"give {len(joints)} joint positions in radians, in order: {' '.join(joints)}"
         )
+    timeout = point_timeout(described["arm_timeout_s"])
     with DeviceClient(context.binary("manipulation-device"), plan) as client:
         if args.operation == "joint-step":
-            result = client.jog_arm(index, args.delta, args.speed)
+            result = client.jog_arm(index, args.delta, args.speed, timeout=timeout)
         else:
-            result = client.move_arm(args.positions, args.speed)
+            check_duration(
+                client.state(), args.positions, args.speed, described["arm_timeout_s"],
+                described["arm_tolerance_rad"],
+            )
+            result = client.move_arm(args.positions, args.speed, timeout=timeout)
         print(result, flush=True)
 
 
@@ -334,22 +376,29 @@ def main():
     check = commands.add_parser("check", help="verify dependencies without opening hardware")
     check.add_argument("--profile", choices=("build", "control", "vision"), default="control")
     commands.add_parser("demo", help="run the Mock arm and hand point task; no hardware")
+    drivers = commands.add_parser("drivers", help="list registered device drivers")
+    drivers.add_argument("--roles", action="store_true", help="list arm and effector drivers")
+    task = commands.add_parser("run", help="execute the configured capability steps in order")
+    task.add_argument("--plan", required=True, help="device and task configuration")
+    task.add_argument("--enable", action="store_true", help="explicitly enable the arm first")
     configure = commands.add_parser(
         "configure",
-        help="create SITE/MODEL/device.yaml from a model template and make it the current device",
+        help="create or reuse SITE/MODEL/device.yaml and make it the current device",
     )
     configure.add_argument("model", help="robot description, for example nero")
     configure.add_argument(
-        "--variant", default="arm", help="template under the model's devices/ (default: arm)"
+        "--variant", default="arm", help="template for a new configuration (default: arm)"
     )
     configure.add_argument(
         "--set",
         action="append",
         default=[],
         metavar="NAME=VALUE",
-        help="template value, for example channel=can1",
+        help="template value for a new configuration, for example channel=can1",
     )
-    configure.add_argument("--python", default="python3", help="interpreter for vendor workers")
+    configure.add_argument(
+        "--python", default="python3", help="vendor worker interpreter for a new configuration"
+    )
     use = commands.add_parser(
         "use", help="choose the current device, or list the configured devices"
     )
@@ -500,18 +549,41 @@ def main():
         )
     elif args.operation == "demo":
         context.execute([device, "run", context.data("manipulation") / "examples/mock_device.yaml"])
+    elif args.operation == "drivers":
+        context.execute([device, "driver-roles" if args.roles else "drivers"])
+    elif args.operation == "run":
+        context.execute(
+            [device, "run", context.plan(args.plan), *(["--enable"] if args.enable else [])]
+        )
     elif args.operation == "configure":
         context.check_selectable()
+        if not args.model or args.model in (".", "..") or Path(args.model).name != args.model:
+            raise ValueError("model must be a single directory name")
         tool = load_tool(context.data("manipulation") / "tools/configure_device.py")
-        tool.configure(
-            context.prefix,
-            args.model,
-            context.local(args.model) / "device.yaml",
-            args.variant,
-            tool.parse_values(args.set),
-            args.python,
-        )
+        values = tool.parse_values(args.set)
+        tool.templates(context.prefix, context.layout, args.model)
+        output = context.local(args.model) / "device.yaml"
+        existing = output.exists() or output.is_symlink()
+        if existing:
+            if not output.is_file():
+                raise ValueError(f"configuration path is not a file: {output}")
+            actual = context.describe(output)["model"]
+            if actual != args.model:
+                raise ValueError(
+                    f"existing configuration {output} is for model {actual!r}, "
+                    f"not {args.model!r}; current device unchanged"
+                )
+        else:
+            tool.configure(
+                context.prefix, args.model, output, args.variant, values, args.python
+            )
         context.select(args.model)
+        if existing:
+            print(f"selected existing configuration: {output}")
+            print(
+                "configuration unchanged; creation options (--variant, --set, --python) "
+                "are not applied to existing configurations"
+            )
         print(f"current device: {args.model}")
     elif args.operation == "use":
         if args.name:

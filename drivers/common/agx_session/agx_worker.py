@@ -209,6 +209,7 @@ class AgxConnection:
         self.sdk_root = Path(sdk_root).resolve()
         self.channel = channel
         self.robot = None
+        self.effector_only = False
         self.lease = None
         self.firmware = "unknown"
         self.sequence = 0
@@ -238,6 +239,13 @@ class AgxConnection:
             return operation(*args, **kwargs)
 
     def connect(self):
+        return self._connect_transport(arm_feedback=True)
+
+    def connect_effector_transport(self):
+        """Open the vendor transport without requiring or commanding an arm on this bus."""
+        return self._connect_transport(arm_feedback=False)
+
+    def _connect_transport(self, *, arm_feedback):
         self.wrote = True  # A failed connection is never reused.
         if self.robot is not None:
             raise RuntimeError("already connected")
@@ -264,6 +272,9 @@ class AgxConnection:
         self.robot.set_joint_limits_enabled(True)  # SDK-side clamp to the vendor preset.
         self.robot.set_auto_set_motion_mode_enabled(False)  # Modes are set explicitly (set_mode).
         self.robot.connect()  # No enable, mode switch, home, reset or effector construction.
+        self.effector_only = not arm_feedback
+        if self.effector_only:
+            return {"connected": True}
         self.recording.set()
         self.recorder = threading.Thread(target=self.record, name="agx-feedback", daemon=True)
         self.recorder.start()
@@ -838,7 +849,8 @@ class AgxConnection:
         }
 
     def effector_submit(self, positions, duration_s):
-        self.ready(idle=False)  # A gesture sends hand targets while the arm streams.
+        if not self.effector_only:
+            self.ready(idle=False)  # A gesture sends hand targets while the arm streams.
         current = self.effector_read()
         if current["fault"] or current["moving"]:
             raise RuntimeError("effector faulted or moving")
@@ -902,6 +914,12 @@ def serve(connection, reader, writer):
             ):
                 raise RuntimeError("request deadline exceeded before dispatch")
             operation = request.get("op")
+            if getattr(connection, "effector_only", False) and operation not in (
+                "effector_connect",
+                "effector_read",
+                "effector_submit",
+            ):
+                raise RuntimeError("arm operation unavailable on effector-only transport")
             allowed = {"v", "session", "id", "deadline_ns", "op"}
             if operation == "submit":
                 allowed |= {"target_rad", "speed_scale", "tolerance_rad", "resend_interval_s"}
@@ -935,6 +953,8 @@ def serve(connection, reader, writer):
                 "enable": connection.enable,
                 "hold": connection.hold,
             }
+            if operation == "connect_effector_transport":
+                dispatch[operation] = connection.connect_effector_transport
             if operation == "effector_read":
                 dispatch[operation] = connection.effector_read
             with contextlib.redirect_stdout(sys.stderr):

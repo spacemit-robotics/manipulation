@@ -1,0 +1,20 @@
+UR5e and Robotiq 2F-85 MuJoCo models
+
+Source: https://github.com/google-deepmind/mujoco_menagerie
+Revision: da76818e269b82289eba39808e2fb91d679d6994
+
+The UR5e model and meshes are distributed under the BSD 3-Clause license.
+See models/universal_robots_ur5e/LICENSE.
+
+The Robotiq 2F-85 model and meshes are distributed under the BSD 2-Clause
+license. See models/robotiq_2f85/LICENSE.
+
+The combined UR5e/Robotiq model attaches the Robotiq model to the UR5e's
+published tool attachment site. It is adapted from the SpacemiT SDK's
+perceptive_grasp simulation model; upstream geometry, inertial properties,
+joint definitions and actuator parameters are retained. The gripper uses
+its original linkage constraints; no grasp attachment or object weld is added.
+
+scene.xml, mapping.yaml and the asset manifest are provided by SpacemiT
+under Apache-2.0. Meshes are downloaded separately and checked against
+the SHA-256 digests in assets.json.

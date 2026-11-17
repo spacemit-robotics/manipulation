@@ -91,6 +91,10 @@ class Context:
         """The current device's name, or None."""
         link = self.local("device.yaml")
         if link.is_symlink() and link.is_file():
+            selected = Path(os.path.abspath(link.parent / os.readlink(link)))
+            site = Path(os.path.abspath(self.site))
+            if selected.name == "device.yaml" and selected.parent.parent == site:
+                return selected.parent.name
             return link.resolve().parent.name
         return None
 

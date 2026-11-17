@@ -197,6 +197,26 @@ class DeviceClient:
         """Return driver capabilities; unsupported operations are never emulated."""
         return self.call("capabilities", **kwargs)
 
+    def execute_capability(self, name, parameters=None, *, allow_unverified=False, **kwargs):
+        """Execute a registered capability using the same fields as a configured task step.
+
+        Driver support and parameters are checked before execution. Cancellation and deadlines
+        use the existing command channel. Open-loop completion needs allow_unverified=True.
+        """
+        if not isinstance(name, str) or not name:
+            raise ValueError("capability name must be a nonempty string")
+        if parameters is not None and not isinstance(parameters, dict):
+            raise ValueError("capability parameters must be a mapping")
+        parameters = dict(parameters or {})
+        if "capability" in parameters:
+            raise ValueError("parameters must not override the capability name")
+        return self._motion(
+            "capability",
+            {"succeeded", "unverified"} if allow_unverified else {"succeeded"},
+            step=dict(parameters, capability=name),
+            **kwargs,
+        )
+
     def enable_arm(self, **kwargs):
         """Explicitly enable the arm; requires allow_enable at construction."""
         return self._motion("enable", **kwargs)

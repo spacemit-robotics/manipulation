@@ -3,8 +3,8 @@
  * Explicit Feetech register transactions for the SO101 driver and so101-calibrate, through the
  * public API of the SDK motor component. Opening and closing never write servo registers.
  */
-#ifndef MANIPULATION_DRIVERS_COMMON_SO101_SESSION_FEETECH_BUS_H_
-#define MANIPULATION_DRIVERS_COMMON_SO101_SESSION_FEETECH_BUS_H_
+#ifndef FEETECH_BUS_H
+#define FEETECH_BUS_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -31,17 +31,17 @@ void feetech_bus_close(struct feetech_bus* bus);
  * (65). The motor driver retries internally: a failure can take about 3 s when a response stays
  * incomplete.
  */
-int feetech_bus_read(struct feetech_bus* bus, uint8_t id, uint8_t address, uint8_t* data,
-                     size_t length);
+int feetech_bus_read(
+        struct feetech_bus* bus, uint8_t id, uint8_t address, uint8_t* data, size_t length);
 
 /** Write registers one servo at a time and read them back: the motor driver does not report a lost
  * write. It unlocks EEPROM around writes to addresses 5..39. Returns 0 once confirmed, otherwise -1
  * with errno; a failure may follow partial delivery.
  */
-int feetech_bus_write(struct feetech_bus* bus, uint8_t id, uint8_t address, const uint8_t* data,
-                      size_t length);
+int feetech_bus_write(
+        struct feetech_bus* bus, uint8_t id, uint8_t address, const uint8_t* data, size_t length);
 
 #ifdef __cplusplus
 }
 #endif
-#endif  // MANIPULATION_DRIVERS_COMMON_SO101_SESSION_FEETECH_BUS_H_
+#endif  // FEETECH_BUS_H

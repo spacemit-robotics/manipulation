@@ -64,6 +64,11 @@ def sample(client, model, observe):
 
 
 def validate_report(report):
+    if report.get("schema") == 1 and report.get("mode") == "eye_to_hand":
+        from .hand_eye import validate_report as validate_session_report
+
+        validate_session_report(report)
+        return
     if (
         report.get("schema_version") != 1
         or report.get("quality_passed") is not True
@@ -108,6 +113,23 @@ def export_legacy(candidate, provenance, destination):
     """Format conversion, not implicit activation; camera identity remains mandatory."""
     report, metadata = load(candidate), load(provenance)
     validate_report(report)
+    if report.get("schema") == 1 and report.get("mode") == "eye_to_hand":
+        if report.get("camera") != metadata.get("camera"):
+            raise ValueError("Report camera differs from collection provenance")
+        if report.get("camera", {}).get("frame") != "color_optical" or not report.get(
+            "camera", {}
+        ).get("serial"):
+            raise ValueError("Camera identity missing from collection provenance")
+        if report.get("session_identity") != metadata.get("session_identity"):
+            raise ValueError("Report belongs to a different collection installation")
+        save_new(
+            destination,
+            dict(
+                report,
+                source_candidate_sha256=hashlib.sha256(Path(candidate).read_bytes()).hexdigest(),
+            ),
+        )
+        return
     pose = report["T_base_camera"]
     validate_transform(pose)
     camera = metadata["camera"]

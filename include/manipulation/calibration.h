@@ -7,8 +7,8 @@
  * Transforms are row-major 4x4 rigid transforms with translations in metres. No device is accessed
  * or configured.
  */
-#ifndef MANIPULATION_CALIBRATION_H_
-#define MANIPULATION_CALIBRATION_H_
+#ifndef CALIBRATION_H
+#define CALIBRATION_H
 #include <array>
 #include <vector>
 
@@ -66,8 +66,8 @@ constexpr double kCeilingMaxRotationRad = 0.08726646259971647;
  * @throws std::runtime_error If the samples are too few, invalid or not excited enough.
  */
 CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
-                                 double max_translation_m = kDefaultMaxTranslationM,
-                                 double max_rotation_rad = kDefaultMaxRotationRad);
+        double max_translation_m = kDefaultMaxTranslationM,
+        double max_rotation_rad = kDefaultMaxRotationRad);
 
 /**
  * @brief Check that a transform is finite, homogeneous and rigid.
@@ -75,4 +75,4 @@ CalibrationResult SolveEyeToHand(const std::vector<CalibrationSample>& samples,
  */
 void ValidateTransform(const Transform& transform);
 }  // namespace spacemit::manipulation
-#endif  // MANIPULATION_CALIBRATION_H_
+#endif  // CALIBRATION_H
