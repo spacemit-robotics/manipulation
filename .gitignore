@@ -4,3 +4,11 @@ __pycache__/
 *.pyc
 .pytest_cache/
 descriptions/simulation/*/models/*/assets/
+
+# MuJoCo runtime log (written next to the running binary)
+MUJOCO_LOG.TXT
+
+# manipulation-simulation-camera output files; the directory is chosen by the
+# caller via --output, so ignore the emitted files rather than a fixed path.
+rgb.ppm
+depth.f32
