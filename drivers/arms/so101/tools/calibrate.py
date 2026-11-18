@@ -500,6 +500,24 @@ def save_new(path, value):
     print(f"saved {path}")
 
 
+def archive(path, stamp=None):
+    """Move a calibration file aside under a timestamped name and return where it went.
+
+    Renames the link itself, never what it points to, so the preserved content stays intact and
+    the original name becomes free for a new capture.
+    """
+    path = Path(path).absolute()
+    stamp = stamp or time.strftime("%Y%m%d-%H%M%S")
+    target = path.with_name(f"{path.name}.{stamp}")
+    suffix = 1
+    while os.path.lexists(target):
+        suffix += 1
+        target = path.with_name(f"{path.name}.{stamp}-{suffix}")
+    path.rename(target)
+    print(f"archived {path} -> {target.name}")
+    return target
+
+
 def default_site():
     """As the manipulation command: MANIPULATION_SITE, otherwise the user data directory."""
     if os.environ.get("MANIPULATION_SITE"):
@@ -555,6 +573,12 @@ def main():
     )
     parser.add_argument("--arm-ids", default="1,2,3,4,5")
     parser.add_argument("--gripper-id", type=int, default=6)
+    parser.add_argument(
+        "--replace",
+        action="store_true",
+        help="archive existing calibration files instead of refusing to capture; the previous "
+        "files are kept beside them under a timestamped name",
+    )
     parser.add_argument("--library", help="explicit libmanipulation_feetech_bus.so path")
     args = parser.parse_args()
     site = Path(args.site).expanduser().absolute() / "so101"
@@ -573,9 +597,10 @@ def main():
             if "arm" in parts and "gripper" in parts and files["arm"] == files["gripper"]:
                 raise ValueError("arm and gripper calibration files must differ")
             for part in parts:
-                if os.path.lexists(files[part]):
+                if os.path.lexists(files[part]) and not args.replace:
                     raise FileExistsError(
-                        f"existing calibration kept: {files[part]}; move it aside to capture again"
+                        f"existing calibration kept: {files[part]}; move it aside to capture again,"
+                        " or pass --replace to archive it"
                     )
         arm_ids = arm_ids if "arm" in parts else []
         gripper_id = args.gripper_id if "gripper" in parts else None
@@ -600,10 +625,21 @@ def main():
         )
 
     def save(arm, gripper):
-        if arm_ids:
-            save_new(files["arm"], arm)
-        if gripper_id is not None:
-            save_new(files["gripper"], gripper)
+        """Write the captured travel; archive a previous file only now, once capture has
+        succeeded, so cancelling leaves the old files in place."""
+        pending = [
+            (path, value)
+            for path, value, wanted in (
+                (files["arm"], arm, bool(arm_ids)),
+                (files["gripper"], gripper, gripper_id is not None),
+            )
+            if wanted
+        ]
+        for path, _ in pending:
+            if args.replace and os.path.lexists(path):
+                archive(path)
+        for path, value in pending:
+            save_new(path, value)
 
     bus = RegisterBus(library_path(args.library), args.port, ids)
     try:

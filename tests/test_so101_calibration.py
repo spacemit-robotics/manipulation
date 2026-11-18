@@ -8,6 +8,8 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -396,6 +398,75 @@ class CaptureTests(unittest.TestCase):
                     calibration.save_new(path, {"new": True})
             self.assertEqual(original.read_text(), "original\n")
             self.assertFalse(missing.exists())
+
+    def test_archive_moves_the_file_aside_without_losing_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "so101_calibration.json"
+            path.write_text("previous\n", encoding="utf-8")
+
+            moved = calibration.archive(path, stamp="20260101-000000")
+            self.assertEqual(moved.name, "so101_calibration.json.20260101-000000")
+            self.assertEqual(moved.read_text(), "previous\n")
+            self.assertFalse(path.exists())
+            # The original name is free, so the next capture writes a fresh file beside it.
+            calibration.save_new(path, {"new": True})
+            self.assertEqual(json.loads(path.read_text()), {"new": True})
+
+    def test_archive_keeps_every_previous_run_and_the_link_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "shared.json"
+            target.write_text("shared\n", encoding="utf-8")
+            path = root / "so101_calibration.json"
+            path.symlink_to(target)
+
+            first = calibration.archive(path, stamp="20260101-000000")
+            self.assertFalse(path.exists())
+            self.assertEqual(target.read_text(), "shared\n")  # The link target is untouched.
+            path.symlink_to(target)
+            second = calibration.archive(path, stamp="20260101-000000")
+            self.assertNotEqual(first, second)  # A second run the same second does not overwrite.
+            self.assertEqual(second.name, "so101_calibration.json.20260101-000000-2")
+
+
+class CommandTests(unittest.TestCase):
+    """The command line around capture: which existing files it refuses, and when it archives."""
+
+    def run_command(self, *arguments):
+        return subprocess.run(
+            [sys.executable, str(SOURCE), *arguments],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+        )
+
+    def test_capture_refuses_an_existing_file_and_offers_replace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            (site / "so101").mkdir()
+            existing = site / "so101/so101_calibration.json"
+            existing.write_text("{}\n", encoding="utf-8")
+            result = self.run_command("capture", "--port", "/dev/null", "--site", temporary)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("existing calibration kept", result.stderr)
+            self.assertIn("--replace", result.stderr)
+            self.assertEqual(existing.read_text(), "{}\n")  # Untouched.
+
+    def test_failed_capture_with_replace_leaves_the_old_file_in_place(self):
+        """The file is archived only after capture succeeds, so an aborted run loses nothing."""
+        with tempfile.TemporaryDirectory() as temporary:
+            site = Path(temporary)
+            (site / "so101").mkdir()
+            existing = site / "so101/so101_calibration.json"
+            existing.write_text("previous\n", encoding="utf-8")
+            # No servos behind /dev/null, so capture fails after the file check passes.
+            result = self.run_command(
+                "capture", "--port", "/dev/null", "--site", temporary, "--replace"
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(existing.read_text(), "previous\n")
+            self.assertEqual(sorted(p.name for p in (site / "so101").iterdir()), [existing.name])
 
 
 if __name__ == "__main__":
