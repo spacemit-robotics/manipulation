@@ -191,6 +191,42 @@ class SessionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "installation"):
             export_perceptive(report, self.root / "wrong.json", "realsense", "table-1")
 
+    def test_wider_solve_thresholds_publish_what_the_defaults_reject(self):
+        """A dataset whose residuals exceed the default gate can be solved and exported
+        under explicitly wider thresholds; the report records the thresholds it passed."""
+        session, expected = self.collect()
+        report = solve_session(session.path)
+        self.assertTrue(report["quality_passed"])
+        self.assertEqual(report["thresholds"], {"position_m": 0.005, "angle_deg": 2.0})
+
+        # Corrupt one sample so the default gate fails, then re-solve under the ceiling.
+        record = json.loads((session.path / "sample_0005.json").read_text())
+        record["T_camera_board"] = (
+            pose_matrix([0.01, 0.0, 0.0, 0.0, 0.0, 0.0]) @ np.asarray(record["T_camera_board"])
+        ).tolist()
+        (session.path / "sample_0005.json").write_text(json.dumps(record))
+
+        strict = solve_session(session.path)
+        self.assertFalse(strict["quality_passed"])
+        with self.assertRaisesRegex(ValueError, "quality failed"):
+            export_perceptive(strict, self.root / "strict.json", "realsense", "table-1")
+        self.assertFalse((self.root / "strict.json").exists())
+
+        relaxed = solve_session(session.path, 0.015, 5.0)
+        self.assertTrue(relaxed["quality_passed"])
+        self.assertEqual(relaxed["thresholds"], {"position_m": 0.015, "angle_deg": 5.0})
+        export_perceptive(relaxed, self.root / "relaxed.json", "realsense", "table-1")
+        self.assertTrue((self.root / "relaxed.json").exists())
+
+    def test_solve_thresholds_beyond_the_publication_ceiling_are_refused(self):
+        session, _ = self.collect()
+        with self.assertRaisesRegex(ValueError, "Invalid residual thresholds"):
+            solve_session(session.path, 0.02, 5.0)
+        report = solve_session(session.path)
+        report["thresholds"] = {"position_m": 0.02, "angle_deg": 5.0}
+        with self.assertRaisesRegex(ValueError, "Invalid report quality thresholds"):
+            export_perceptive(report, self.root / "ceil.json", "realsense", "table-1")
+
     def test_read_only_feedback_accepts_five_and_seven_joint_models(self):
         for count in (5, 7):
             client, model = Mock(), Mock()

@@ -93,14 +93,51 @@ def solve(samples, tcp, max_position_m=0.005, max_angle_deg=2.0, *, residual=dis
     }
 
 
+def maximum_residual(report):
+    """Return the worst (position_m, angle_deg) over both residual groups, or None.
+
+    Used only to make a quality failure legible: it never decides the verdict, so a
+    malformed group yields None and the caller falls back to the plain message.
+    """
+    worst_position = worst_angle = None
+    for key in ("holdout_errors_m_deg", "all_sample_errors_m_deg"):
+        group = report.get(key)
+        if not isinstance(group, list):
+            continue
+        for item in group:
+            if (
+                not isinstance(item, (list, tuple))
+                or len(item) != 2
+                or not all(
+                    type(value) in (float, int) and math.isfinite(value)
+                    for value in item
+                )
+            ):
+                continue
+            worst_position = item[0] if worst_position is None else max(worst_position, item[0])
+            worst_angle = item[1] if worst_angle is None else max(worst_angle, item[1])
+    if worst_position is None:
+        return None
+    return worst_position, worst_angle
+
+
 def validate_report(report):
     """Recheck transforms and every recorded residual before publishing an extrinsic."""
-    if (
-        report.get("schema") != 1
-        or report.get("mode") != "eye_to_hand"
-        or report.get("quality_passed") is not True
-    ):
+    if report.get("schema") != 1 or report.get("mode") != "eye_to_hand":
         raise ValueError("Only a quality-passed eye-to-hand report can be published")
+    if report.get("quality_passed") is not True:
+        limits = report.get("thresholds") or {}
+        worst = maximum_residual(report)
+        raise ValueError(
+            "Report quality failed: worst residual "
+            f"{worst[0] * 1000:.2f} mm / {worst[1]:.2f} deg against "
+            f"{limits.get('position_m', 0) * 1000:.1f} mm / "
+            f"{limits.get('angle_deg', 0):.1f} deg; the publication ceiling is "
+            "15 mm / 5 deg, so either re-solve with wider thresholds or capture "
+            "more poses"
+            if worst else
+            "Only a quality-passed eye-to-hand report can be published")
+
     matrix(report["T_base_camera"])
     matrix(report["T_flange_tcp"])
     limits = report["thresholds"]
