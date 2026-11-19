@@ -8,5 +8,6 @@
   <depend>pyagxarm</depend>
   <system_depend check="pkg-config --exists yaml-cpp">libyaml-cpp-dev</system_depend>
   <system_depend check="python3 -c 'import numpy'">python3-numpy</system_depend>
+  <system_depend check="pkg-config --exists eigen3">libeigen3-dev</system_depend>
   <export><build_type>cmake</build_type></export>
 </package>

@@ -67,7 +67,7 @@ class DependencyTests(unittest.TestCase):
         self.assertIn("pyagxarm", [item.text for item in package.findall("depend")])
         self.assertEqual(
             {item.text for item in package.findall("system_depend")},
-            {"libyaml-cpp-dev", "python3-numpy"},
+            {"libyaml-cpp-dev", "python3-numpy", "libeigen3-dev"},
         )
         dependencies = ET.parse(vendor / "package.xml").getroot().findall("system_depend")
         self.assertEqual(
@@ -99,7 +99,13 @@ done < <(resolve_nonros2_dependency_closure "$2" 1)
             (
                 "components/control/manipulation",
                 ["components/thirdparty/pyagxarm", "components/control/manipulation"],
-                {"python3-can", "python3-typing-extensions", "libyaml-cpp-dev", "python3-numpy"},
+                {
+                    "python3-can",
+                    "python3-typing-extensions",
+                    "libyaml-cpp-dev",
+                    "python3-numpy",
+                    "libeigen3-dev",
+                },
             ),
         ):
             with self.subTest(package=package), tempfile.TemporaryDirectory() as temporary:
