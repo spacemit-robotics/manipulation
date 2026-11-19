@@ -396,12 +396,12 @@ std::string TimeoutDetail(
     detail += ": " + missed;
     // A joint that will not move against gravity or friction is the usual cause; a small step
     // occasionally needs a larger one to break away.
-    detail += ". If the joint does not move at all, it is fighting gravity or static friction: "
-              "support the arm and retry with a larger --speed, or move the joint by hand "
-              "while torque is released";
+    detail += ". If the joint does not move at all, it is fighting gravity or static friction: ";
+    detail += "support the arm and retry with a larger --speed, or move the joint by hand ";
+    detail += "while torque is released";
     if (worst_rad > 0.15) {
-        detail += "; a miss this large usually means the joint is blocked or the target is "
-                  "outside its travel";
+        detail += "; a miss this large usually means the joint is blocked or the target is ";
+        detail += "outside its travel";
     }
     return detail;
 }

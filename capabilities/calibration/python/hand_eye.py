@@ -128,15 +128,16 @@ def validate_report(report):
     if report.get("quality_passed") is not True:
         limits = report.get("thresholds") or {}
         worst = maximum_residual(report)
+        if worst is None:
+            raise ValueError("Only a quality-passed eye-to-hand report can be published")
+        position, angle = worst
         raise ValueError(
             "Report quality failed: worst residual "
-            f"{worst[0] * 1000:.2f} mm / {worst[1]:.2f} deg against "
+            f"{position * 1000:.2f} mm / {angle:.2f} deg against "
             f"{limits.get('position_m', 0) * 1000:.1f} mm / "
             f"{limits.get('angle_deg', 0):.1f} deg; the publication ceiling is "
             "15 mm / 5 deg, so either re-solve with wider thresholds or capture "
-            "more poses"
-            if worst else
-            "Only a quality-passed eye-to-hand report can be published")
+            "more poses")
 
     matrix(report["T_base_camera"])
     matrix(report["T_flange_tcp"])

@@ -88,16 +88,16 @@ std::string PortRemedy(const std::string& port) {
     std::string reason;
     switch (error) {
     case ENOENT:
-        reason = "serial port does not exist; the USB adapter is unplugged or the name changed. "
-                 "List candidates with `ls -l /dev/serial/by-id/` and use that full path";
+        reason = "serial port does not exist; the USB adapter is unplugged or the name changed. ";
+        reason += "List candidates with `ls -l /dev/serial/by-id/` and use that full path";
         break;
     case EACCES:
-        reason = "serial port is not writable by this user; run `sudo usermod -aG dialout $USER` "
-                 "and log in again, or use the by-id path which needs no extra rule";
+        reason = "serial port is not writable by this user; run `sudo usermod -aG dialout $USER` ";
+        reason += "and log in again, or use the by-id path which needs no extra rule";
         break;
     case EBUSY:
-        reason = "serial port is held by another process; close any running `manipulation "
-                 "inspect`, `manipulation-device` or `perceptive_grasp`, then retry";
+        reason = "serial port is held by another process; close any running `manipulation ";
+        reason += "inspect`, `manipulation-device` or `perceptive_grasp`, then retry";
         break;
     case ENODEV:
         reason = "the motor driver could not open the port";
@@ -249,14 +249,14 @@ std::vector<uint8_t> SharedSession::Registers(uint8_t id, uint8_t address, size_
     Require(bus_ != nullptr, "not connected");
     std::vector<uint8_t> bytes(count);
     if (feetech_bus_read(bus_, id, address, bytes.data(), bytes.size()) != 0) {
-        std::string detail = "read SO101 motor " + std::to_string(id) + " failed: no reply on " +
-                             settings_.port;
+        std::string detail = "read SO101 motor " + std::to_string(id) + " failed: no reply on ";
+        detail += settings_.port;
         if (address == 0 && count == kRegisters) {
             // This is the first frame of a connection. A silent bus is nearly always the wrong
             // port, a silent single ID nearly always an unpowered servo; the reply tells them apart.
-            detail += " — either the port is not the servo bus, or that motor is unpowered. "
-                      "Confirm the port with `ls -l /dev/serial/by-id/`, then check the motor's "
-                      "power LED and its daisy-chain cable";
+            detail += " — either the port is not the servo bus, or that motor is unpowered. ";
+            detail += "Confirm the port with `ls -l /dev/serial/by-id/`, then check the motor's ";
+            detail += "power LED and its daisy-chain cable";
         }
         throw std::system_error(errno, std::generic_category(), detail);
     }
