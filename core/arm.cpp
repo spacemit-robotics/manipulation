@@ -371,6 +371,40 @@ double ResolveTolerance(double requested, double device) {
             "tolerance must be in [0, 0.8 deg]");
     return requested == 0 ? device : requested;
 }
+
+// Names the joints that missed the target and what usually causes it, so a timeout is
+// actionable without reading the driver. The prefix stays for callers that match on it.
+std::string TimeoutDetail(
+        const DeviceConfig& config, const std::vector<double>& target, const ArmState& state) {
+    std::string detail = "point deadline exceeded";
+    std::string missed;
+    double worst_rad = 0;
+    for (std::size_t i = 0; i < target.size() && i < state.joints_rad.size(); ++i) {
+        const double error_rad = target[i] - state.joints_rad[i];
+        if (std::abs(error_rad) <= config.tolerance_rad) continue;
+        if (!missed.empty()) missed += ", ";
+        const std::string name = i < config.joints.size() ? config.joints[i].name : "joint";
+        missed += name + " off by " + std::to_string(std::abs(error_rad) / kDegree).substr(0, 4) +
+                " deg";
+        worst_rad = std::max(worst_rad, std::abs(error_rad));
+    }
+    if (missed.empty()) {
+        // Every joint is inside tolerance: only the stillness test kept the command open.
+        return detail + ": all joints within tolerance but feedback never settled; "
+                        "the device may be oscillating or its samples stalled";
+    }
+    detail += ": " + missed;
+    // A joint that will not move against gravity or friction is the usual cause; a small step
+    // occasionally needs a larger one to break away.
+    detail += ". If the joint does not move at all, it is fighting gravity or static friction: ";
+    detail += "support the arm and retry with a larger --speed, or move the joint by hand ";
+    detail += "while torque is released";
+    if (worst_rad > 0.15) {
+        detail += "; a miss this large usually means the joint is blocked or the target is ";
+        detail += "outside its travel";
+    }
+    return detail;
+}
 }  // namespace
 
 CommandResult ArmSession::Submit(const JointPoint& point) {
@@ -513,7 +547,14 @@ CommandResult ArmSession::Poll() {
     if (p.result.status != Result::kRunning) return p.result;
     try {
         if (Clock::now() >= p.deadline) {
-            Stop(Result::kTimedOut, "point deadline exceeded");
+            std::string detail = "point deadline exceeded";
+            try {
+                detail = TimeoutDetail(p.config, p.point.target_rad, Read());
+            } catch (const std::exception& error) {
+                detail += std::string(": target not reached and feedback unavailable (") +
+                        error.what() + ")";
+            }
+            Stop(Result::kTimedOut, detail);
             return p.result;
         }
         const auto state = Read();

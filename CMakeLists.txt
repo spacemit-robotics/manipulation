@@ -15,6 +15,8 @@ find_package(yaml-cpp REQUIRED)
 option(MANIPULATION_ENABLE_NERO "Build the Nero/Revo2 driver (vendor SDK is used at run time only)"
     ON)
 option(MANIPULATION_ENABLE_SO101 "Build the SO101 arm and gripper driver" ON)
+option(MANIPULATION_ENABLE_KINEMATICS_EIGEN
+    "Build the built-in Eigen FK/IK backend (no external kinematics library)" ON)
 option(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO "Build the offline Pinocchio FK/IK backend" OFF)
 option(MANIPULATION_ENABLE_MUJOCO "Build the local MuJoCo physics simulation driver" OFF)
 option(MANIPULATION_ENABLE_MUJOCO_REMOTE "Build the TCP MuJoCo client without a local engine" OFF)
@@ -135,6 +137,31 @@ target_include_directories(manipulation_kinematics PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 set_target_properties(manipulation_kinematics PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set(kinematics_source "#include \"manipulation/kinematics.h\"\nnamespace spacemit::manipulation {\n")
+if(MANIPULATION_ENABLE_KINEMATICS_EIGEN)
+    # Header-only Eigen keeps this backend free of any external kinematics library.
+    find_package(Eigen3 QUIET CONFIG)
+    if(NOT Eigen3_FOUND)
+        find_path(MANIPULATION_EIGEN_INCLUDE_DIR Eigen/Core
+            HINTS /usr/include/eigen3 /usr/local/include/eigen3)
+        if(NOT MANIPULATION_EIGEN_INCLUDE_DIR)
+            message(FATAL_ERROR
+                "MANIPULATION_ENABLE_KINEMATICS_EIGEN=ON requires Eigen3 headers; "
+                "install libeigen3-dev or set MANIPULATION_ENABLE_KINEMATICS_EIGEN=OFF")
+        endif()
+    endif()
+    target_sources(manipulation_kinematics PRIVATE capabilities/kinematics/eigen_kinematics.cpp)
+    # Eigen is header-only and used only by this translation unit, so take the include path
+    # instead of linking Eigen3::Eigen. A static library re-exports PRIVATE link libraries as
+    # INTERFACE_LINK_LIBRARIES, which would force every consumer of manipulation_kinematics to
+    # call find_package(Eigen3) even though no Eigen symbol crosses the library boundary.
+    if(Eigen3_FOUND)
+        target_include_directories(manipulation_kinematics PRIVATE ${EIGEN3_INCLUDE_DIR})
+    else()
+        target_include_directories(manipulation_kinematics
+            PRIVATE ${MANIPULATION_EIGEN_INCLUDE_DIR})
+    endif()
+    string(APPEND kinematics_source "void RegisterEigenKinematics(KinematicsRegistry*);\n")
+endif()
 if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
     find_package(pinocchio CONFIG REQUIRED)
     target_sources(manipulation_kinematics PRIVATE capabilities/kinematics/pinocchio_kinematics.cpp)
@@ -143,6 +170,9 @@ if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
 endif()
 string(APPEND kinematics_source
     "KinematicsRegistry MakeBuiltinKinematicsRegistry() { KinematicsRegistry registry;\n")
+if(MANIPULATION_ENABLE_KINEMATICS_EIGEN)
+    string(APPEND kinematics_source "RegisterEigenKinematics(&registry);\n")
+endif()
 if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
     string(APPEND kinematics_source "RegisterPinocchioKinematics(&registry);\n")
 endif()
@@ -280,7 +310,7 @@ if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_executable(manipulation_kinematics_test tests/kinematics_test.cpp)
     target_link_libraries(manipulation_kinematics_test PRIVATE manipulation_kinematics)
-    if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO)
+    if(MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO OR MANIPULATION_ENABLE_KINEMATICS_EIGEN)
         add_test(NAME manipulation_kinematics_cpp_contract COMMAND manipulation_kinematics_test
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/kinematics_chain.urdf
             ${CMAKE_CURRENT_SOURCE_DIR}/descriptions/robots/so101/so101.urdf)

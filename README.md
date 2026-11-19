@@ -39,8 +39,9 @@ mm --with-deps
 ```
 
 - 组件安装到 `output/staging`，缺少系统依赖时按提示安装；新终端须重新执行 `source build/envsetup.sh`。
+- 编译前确认当前终端**没有激活 Python 虚拟环境**。`mm --with-deps` 用 `python3 -c 'import can'` 之类的命令检查系统包，激活 venv 后 `python3` 指向隔离的解释器，看不到 `apt` 安装的 `python3-can`、`python3-typing-extensions`，会一直报 `still missing after installation`。已激活时先执行 `deactivate`。
 - 构建选项 `MANIPULATION_ENABLE_NERO`、`MANIPULATION_ENABLE_SO101` 默认开启；检测到 OpenCV 时同时构建标定求解器（`MANIPULATION_ENABLE_CALIBRATION`）。
-- C++ 正逆运动学按需启用：安装 Pinocchio 后执行 `mm -DMANIPULATION_ENABLE_KINEMATICS_PINOCCHIO=ON`。Python 运动学不需要 Pinocchio。
+- C++ 正逆运动学默认使用内置的 `eigen` 后端（`MANIPULATION_ENABLE_KINEMATICS_EIGEN`，默认 `ON`），只需 Eigen 头文件，不需要额外的运动学库。旧配置里的 `kinematics_solver: "pinocchio"` 需要改为 `"eigen"`，或安装 Pinocchio 后执行 `mm -DMANIPULATION_ENABLE_KINEMATICS_PINOCCHIO=ON` 保留原后端。Python 运动学不需要任何外部后端。
 
 安装后分别查看整机和独立角色驱动，不连接硬件：
 

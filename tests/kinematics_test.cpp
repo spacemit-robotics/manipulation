@@ -35,10 +35,11 @@ void RegistryContract() {
     Reject([&] { registry.Create("test", {}); });
 }
 
-void SolverContract(const std::string& fixture, const std::string& so101) {
+void SolverContract(const std::string& backend, const std::string& fixture,
+        const std::string& so101) {
     auto registry = m::MakeBuiltinKinematicsRegistry();
     m::KinematicsConfig config{fixture, "base", "tip", {"shoulder", "elbow"}};
-    auto solver = registry.Create("pinocchio", config);
+    auto solver = registry.Create(backend, config);
     const auto neutral = solver->Forward({0, 0});
     Check(std::abs(neutral.x - 2) < 1e-10 && std::abs(neutral.y) < 1e-10 &&
                     std::abs(neutral.z) < 1e-10,
@@ -67,21 +68,21 @@ void SolverContract(const std::string& fixture, const std::string& so101) {
     Reject([&] { solver->Inverse({2, 0, 0, 1e300, 0, 0, 1e300}, {0, 0}, options); });
     Reject([&] { solver->Inverse({2, 0, 0, 0, 0, 0, 0}, {0, 0}, options); });
     config.base_link = "sibling";
-    Reject([&] { registry.Create("pinocchio", config); });
+    Reject([&] { registry.Create(backend, config); });
     config.base_link = "base";
     options.timeout_s = 0;
     Reject([&] { solver->Inverse(bent, {0, 0}, options); });
     options.timeout_s = 1e-15;
     Check(!solver->Inverse(neutral, {0, 0}, options), "expired request returned a solution");
     config.joint_names = {"shoulder", "shoulder"};
-    Reject([&] { registry.Create("pinocchio", config); });
+    Reject([&] { registry.Create(backend, config); });
     config.joint_names = {"elbow", "shoulder"};
-    Reject([&] { registry.Create("pinocchio", config); });
+    Reject([&] { registry.Create(backend, config); });
     config.joint_names = {"shoulder", "elbow", "gripper"};
-    Reject([&] { registry.Create("pinocchio", config); });
+    Reject([&] { registry.Create(backend, config); });
     config = {so101, "base_link", "gripper_frame_link",
             {"shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"}};
-    solver = registry.Create("pinocchio", config);
+    solver = registry.Create(backend, config);
     const std::vector<double> joints{0.1, -0.3, 0.4, 0.2, -0.1};
     options = {};
     options.timeout_s = 2;
@@ -98,7 +99,30 @@ void SolverContract(const std::string& fixture, const std::string& so101) {
 int main(int argc, char** argv) {
     try {
         RegistryContract();
-        if (argc == 3) SolverContract(argv[1], argv[2]);
+        if (argc == 3) {
+            // Run every built-in backend against the same contract. A backend absent from this
+            // build is skipped rather than failed, so the suite works with either backend alone.
+            const char* backends[] = {"eigen", "pinocchio"};
+            const auto registry = m::MakeBuiltinKinematicsRegistry();
+            int exercised = 0;
+            for (const auto* backend : backends) {
+                // Only "unknown kinematics backend" means the backend is absent from this build;
+                // any other rejection comes from the empty config and means the backend exists.
+                bool available = true;
+                try {
+                    registry.Create(backend, {});
+                } catch (const std::invalid_argument& error) {
+                    const std::string message = error.what();
+                    available = message.find("unknown kinematics backend") == std::string::npos;
+                } catch (const std::exception&) {
+                    available = true;
+                }
+                if (!available) continue;
+                SolverContract(backend, argv[1], argv[2]);
+                ++exercised;
+            }
+            Check(exercised > 0, "no built-in kinematics backend is available");
+        }
         std::cout << "kinematics contracts passed\n";
         return 0;
     } catch (const std::exception& error) {

@@ -224,6 +224,9 @@ class So101Tests(unittest.TestCase):
         with self.assertRaisesRegex(DeviceCommandError, "point deadline exceeded") as failure:
             operator_cli.joint_move(context, args)
         self.assertEqual(failure.exception.result["status"], "timed_out")
+        # The timeout has to say which joint missed and how to recover, not just that it expired.
+        self.assertIn("shoulder_pan off by", failure.exception.result["detail"])
+        self.assertIn("gravity or static friction", failure.exception.result["detail"])
         self.assertEqual(int.from_bytes(self.bus.registers[1][56:58], "little"), 2055)
         self.assertTrue(self.bus.writes)
         self.assertTrue(all(address == 42 for _, address, _ in self.bus.writes))

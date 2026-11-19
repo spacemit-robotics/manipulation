@@ -5,7 +5,9 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <filesystem>  // NOLINT(build/c++17): target explicitly requires C++17.
 #include <set>
 #include <sstream>
@@ -16,6 +18,7 @@
 namespace spacemit::manipulation::so101 {
 namespace {
 constexpr double kPi = 3.14159265358979323846;
+constexpr size_t kRegisters = 71;  // Identity, configuration and feedback in one frame.
 const std::array<std::string, kArmJoints> kJointNames{
         "shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"};
 
@@ -72,6 +75,40 @@ YAML::Node CalibrationFile(const std::string& path) {
 
 int Word(const std::vector<uint8_t>& data, size_t offset) {
     return data.at(offset) | (static_cast<int>(data.at(offset + 1)) << 8);
+}
+
+// Every failure below has one common cause worth naming: the configured port is not the servo bus.
+// Say which port was used and what to look at, so the operator does not have to guess from errno.
+std::string PortRemedy(const std::string& port) {
+    return " ; port in use was " + port +
+            " — confirm it with `ls -l /dev/serial/by-id/` and update manipulator device.yaml";
+}
+
+[[noreturn]] void ThrowOpenFailure(const std::string& port, int error) {
+    std::string reason;
+    switch (error) {
+    case ENOENT:
+        reason = "serial port does not exist; the USB adapter is unplugged or the name changed. ";
+        reason += "List candidates with `ls -l /dev/serial/by-id/` and use that full path";
+        break;
+    case EACCES:
+        reason = "serial port is not writable by this user; run `sudo usermod -aG dialout $USER` ";
+        reason += "and log in again, or use the by-id path which needs no extra rule";
+        break;
+    case EBUSY:
+        reason = "serial port is held by another process; close any running `manipulation ";
+        reason += "inspect`, `manipulation-device` or `perceptive_grasp`, then retry";
+        break;
+    case ENODEV:
+        reason = "the motor driver could not open the port";
+        break;
+    default:
+        reason = std::strerror(error);
+        break;
+    }
+    // Kept as system_error so callers can still branch on the code; the text carries the remedy.
+    throw std::system_error(error, std::generic_category(),
+            "SO101: cannot open " + port + ": " + reason + PortRemedy(port));
 }
 }  // namespace
 
@@ -193,8 +230,9 @@ void SharedSession::Connect() {
         std::vector<uint8_t> ids;
         if (settings_.arm_present) ids.assign(settings_.ids.begin(), settings_.ids.end());
         if (settings_.gripper_calibrated) ids.push_back(settings_.gripper_id);
+        errno = 0;
         bus_ = feetech_bus_open(settings_.port.c_str(), ids.data(), ids.size());
-        if (!bus_) throw std::system_error(errno, std::generic_category(), "open SO101 serial bus");
+        if (!bus_) ThrowOpenFailure(settings_.port, errno);
     }
     ++owners_;
 }
@@ -211,8 +249,16 @@ std::vector<uint8_t> SharedSession::Registers(uint8_t id, uint8_t address, size_
     Require(bus_ != nullptr, "not connected");
     std::vector<uint8_t> bytes(count);
     if (feetech_bus_read(bus_, id, address, bytes.data(), bytes.size()) != 0) {
-        throw std::system_error(
-                errno, std::generic_category(), "read SO101 motor " + std::to_string(id));
+        std::string detail = "read SO101 motor " + std::to_string(id) + " failed: no reply on ";
+        detail += settings_.port;
+        if (address == 0 && count == kRegisters) {
+            // This is the first frame of a connection. A silent bus is nearly always the wrong
+            // port, a silent single ID nearly always an unpowered servo; the reply tells them apart.
+            detail += " — either the port is not the servo bus, or that motor is unpowered. ";
+            detail += "Confirm the port with `ls -l /dev/serial/by-id/`, then check the motor's ";
+            detail += "power LED and its daisy-chain cable";
+        }
+        throw std::system_error(errno, std::generic_category(), detail);
     }
     return bytes;
 }
@@ -220,7 +266,10 @@ std::vector<uint8_t> SharedSession::Registers(uint8_t id, uint8_t address, size_
 Sample SharedSession::Read(uint8_t id) {
     std::lock_guard<std::mutex> guard(mutex_);
     const auto data = Registers(id, 0, 71);  // Identity, configuration and feedback in one frame.
-    Require(Word(data, 3) == 777, "motor " + std::to_string(id) + " is not an STS3215 (model 777)");
+    Require(Word(data, 3) == 777,
+            "motor " + std::to_string(id) + " is not an STS3215 (model 777); " + settings_.port +
+                    " answered but is not the SO101 servo bus — pick the other entry under "
+                    "/dev/serial/by-id/ and retry");
     Sample sample;
     sample.firmware = std::to_string(data[0]) + "." + std::to_string(data[1]);
     sample.minimum = Word(data, 9);

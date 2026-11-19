@@ -22,7 +22,9 @@ void Check(bool condition, const char* detail) {
 // The end effector moves only while the arm holds its position under torque.
 void CheckArmHolds(const ArmState& arm, bool settling) {
     Check(!arm.fault, "arm faulted; tool motion refused");
-    Check(arm.enabled, "arm is not enabled; enable the arm before moving the end effector");
+    Check(arm.enabled,
+            "arm is not enabled; run `manipulation enable <plan>` first, or drop the caller's "
+            "no-enable option");
     Check(arm.position_mode, "arm is not in position mode; tool motion refused");
     Check(!arm.moving || settling,
             "arm is moving; wait until it stops before moving the end effector");
@@ -257,7 +259,8 @@ void DeviceSession::Disconnect() noexcept {
 
 void DeviceSession::Ready() const {
     Check(impl_->connected && !impl_->latched,
-            "device disconnected or fault latched; inspect before reconnect");
+            "device disconnected or fault latched; read the first error, then rerun the command "
+            "to reconnect");
 }
 
 ArmState DeviceSession::ReadArm() {

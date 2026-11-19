@@ -568,7 +568,15 @@ DeviceClient(executable, plan, *, allow_motion=True, allow_enable=False, allow_d
 ### C++ 接口
 
 头文件 `manipulation/kinematics.h`，链接目标 `spacemit::manipulation_kinematics`。
-启用 `MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO` 后，内置注册表提供 `pinocchio` 后端；默认关闭。
+
+内置注册表提供两个后端，均可独立开关：
+
+| 后端 | 开关 | 默认 | 依赖 |
+| --- | --- | --- | --- |
+| `eigen` | `MANIPULATION_ENABLE_KINEMATICS_EIGEN` | `ON` | 仅 Eigen 头文件 |
+| `pinocchio` | `MANIPULATION_ENABLE_KINEMATICS_PINOCCHIO` | `OFF` | 需自行编译安装 Pinocchio |
+
+`eigen` 后端自带 URDF 读取、变换链正解和阻尼最小二乘逆解，不依赖 urdfdom、Boost 或任何外部运动学库。两个后端对同一 URDF 与关节序列给出一致的正解结果，可在配置中用 `kinematics_solver` 切换，无需改代码。同时启用时两个后端都注册，配置按名字选择。
 
 | 接口 | 含义 |
 | --- | --- |
