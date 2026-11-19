@@ -60,8 +60,15 @@ class DependencyTests(unittest.TestCase):
     def test_vendor_dependencies_have_one_metadata_owner(self):
         sdk = ROOT.parents[2]
         vendor = sdk / "components/thirdparty/pyagxarm"
+        # The build framework resolves components/thirdparty/<name> metadata through the
+        # platform overlay, and tools/setup_sdk.sh is what creates it. Say so on failure:
+        # a bare False here only tells the reader that a symlink is missing somewhere.
         overlay = sdk / "platform/generic/components/thirdparty/pyagxarm/package.xml"
-        self.assertTrue(overlay.is_symlink())
+        self.assertTrue(
+            overlay.is_symlink(),
+            "Run `bash components/thirdparty/pyagxarm/tools/setup_sdk.sh` from the SDK root; "
+            f"it links the vendor metadata to {overlay}",
+        )
         self.assertTrue(overlay.samefile(vendor / "package.xml"))
         package = ET.parse(ROOT / "package.xml").getroot()
         self.assertIn("pyagxarm", [item.text for item in package.findall("depend")])
@@ -80,6 +87,15 @@ class DependencyTests(unittest.TestCase):
 
     def test_sdk_dependency_closure_preserves_runtime_requirements(self):
         sdk = ROOT.parents[2]
+        # Same prerequisite as the metadata-owner test above: without the overlay the closure
+        # silently loses every pyagxarm system dependency and both cases below fail on a set
+        # difference that says nothing about the cause.
+        overlay = sdk / "platform/generic/components/thirdparty/pyagxarm/package.xml"
+        self.assertTrue(
+            overlay.is_file(),
+            "Run `bash components/thirdparty/pyagxarm/tools/setup_sdk.sh` from the SDK root; "
+            f"the dependency closure reads {overlay}",
+        )
         script = """
 set -euo pipefail
 REPO_ROOT="$1"

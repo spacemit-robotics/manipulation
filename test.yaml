@@ -15,9 +15,10 @@ tests:
     description: Device contracts, Mock, Nero fake-SDK/IPC and signal tests; no device access.
     category: functional
     scopes: [pr, scheduled, release]
-    timeout_s: 180
+    timeout_s: 600
     workdir: sdk
     command: |
+      bash components/thirdparty/pyagxarm/tools/setup_sdk.sh
       cmake -S components/control/manipulation -B output/test/manipulation-contract -DCMAKE_BUILD_TYPE=Release -DMANIPULATION_ENABLE_NERO=ON -DMANIPULATION_LOCK_DIRECTORY="$PWD/output/test/manipulation-locks"
       cmake --build output/test/manipulation-contract -j2
       ctest --test-dir output/test/manipulation-contract --output-on-failure
